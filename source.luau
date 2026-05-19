@@ -191,8 +191,9 @@ GlobalWindow.Parent = CoreGui;
 NeverLose.Scales = {
 	Small = UDim2.fromOffset(540,380),
 	Mobile = UDim2.fromOffset(640,385),
-	Default = UDim2.fromOffset(640 , 480),
-	Large = UDim2.fromOffset(800 , 600)
+	Default = UDim2.fromOffset(640,480),
+	Medium = UDim2.fromOffset(720,540),
+	Large = UDim2.fromOffset(800,600)
 };
 
 NeverLose.IconColor = Color3.fromRGB(255, 255, 255);
