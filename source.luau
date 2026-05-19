@@ -198,7 +198,7 @@ NeverLose.Scales = {
 NeverLose.IconColor = Color3.fromRGB(255, 255, 255);
 NeverLose.ScreenGui = GlobalWindow;
 NeverLose.Flags = {};
-NeverLose.AccentColor = Color3.fromRGB(78, 127, 252);
+NeverLose.AccentColor = (tostring(game.GameId) == "4730278139" and Color3.fromRGB(255,0,0)) or ((tostring(game.GameId) == "9073513091" or tostring(game.GameId) == "7750955984") and Color3.fromRGB(0,255,0)) or Color3.fromRGB(78,127,252);
 NeverLose.MainColor = Color3.fromRGB(8, 8, 13);
 NeverLose.RegisiteryColor = {};
 NeverLose.NameRegisitry = {};
