@@ -9614,7 +9614,7 @@ function NeverLose:CreateWindow(Config)
 		});
 
 		MenuSection:AddLabel('Sidebar width'):AddSlider({Default=128,Min=112,Max=176,Type='px',Rounding=0,Size=125,Callback=function(v) Window:SetSidebarWidth(v); end});
-		MenuSection:AddLabel('Hide username'):AddToggle({Default=false,Callback=function(v) Window:SetAccount({Username=v and 'blydi.net' or LocalPlayer.Name,Expires=Window.Expires}); end});
+		MenuSection:AddLabel('Hide username'):AddToggle({Default=false,Callback=function(v) Window:SetAccount({Username=v and 'MirageHub' or LocalPlayer.Name,Expires=Window.Expires}); end});
 		local LayoutSection=SettingsTab:AddSection({Name='Layout',Icon='frame-corners',Position='left'});
 		LayoutSection:AddLabel('Section spacing'):AddSlider({Default=12,Min=8,Max=24,Type='px',Size=125,Callback=function(v) Window:SetSectionGap(v); end});
 		LayoutSection:AddLabel('Corner radius'):AddSlider({Default=8,Min=0,Max=14,Type='px',Size=125,Callback=function(v) NeverLose:SetCornerRadius(v); end});
