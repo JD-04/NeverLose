@@ -207,7 +207,7 @@ NeverLose.ThemeName='Graphite';
 NeverLose.ThemeTargets=setmetatable({},{__mode='k'});
 NeverLose.ThemeHooks={};
 NeverLose.FontObjects=setmetatable({},{__mode='k'});
-NeverLose.ThemePresetOrder={'Graphite','Nightfall','Arctic','Orchid','Rose Quartz','Sakura','Evergreen','Amber','Crimson','Ocean'};
+NeverLose.ThemePresetOrder={'Graphite','Nightfall','Arctic','Orchid','Rose Quartz','Sakura','Evergreen','Amber','Crimson','Ocean','UBG'};
 NeverLose.ThemePresetSeeds={
  ['Graphite']={'111318','15171c','13151b','1c1f26','262a33','89b4fa','edf0f7','bbc2d0'},
  ['Nightfall']={'0c1020','101527','10162a','18213a','242f49','91a7ff','e9edff','b9c2e2'},
@@ -218,7 +218,11 @@ NeverLose.ThemePresetSeeds={
  ['Evergreen']={'101914','152119','121e17','1d2d23','2b3e30','94d6a7','eaf5ed','bbd2c1'},
  ['Amber']={'1b1711','221d15','201b14','2d261c','3b3225','edc078','faf2e3','d6c8ac'},
  ['Crimson']={'1b1317','23191e','20151b','2e2028','402c35','ec8b9c','faedf1','dabdc7'},
- ['Ocean']={'0e171e','121e28','10202b','192d3b','263e4d','75bfee','e6f4fc','b1cddb'}
+ ['Ocean']={'0e171e','121e28','10202b','192d3b','263e4d','75bfee','e6f4fc','b1cddb'},
+ ['UBG']={'0e1015','14171e','0e1015','14171e','1e232e','ff1414','ffffff','9aa0a6'}
+};
+NeverLose.ThemePresetOverrides={
+	UBG={Border='282e3d',ToggleOff='1e232e'}
 };
 NeverLose.Motion = {Enabled=true,Style='Original',Direction='Original',FadeTime=0.175,PopupEffect='Scale'};
 NeverLose.MotionStyles = {'Original','Linear','Sine','Quad','Cubic','Quart','Quint','Exponential','Circular','Back','Bounce','Elastic'};
@@ -934,6 +938,12 @@ function NeverLose:BuildThemePalette(name)
 	t.ToggleOff = t.Control:Lerp(t.Window, 0.25);
 	t.Risk = Color3.fromRGB(244,105,123);
 	t.SliderFill, t.ToggleOn, t.TabAccent = t.Accent, t.Accent, t.Accent;
+	local overrides = self.ThemePresetOverrides and self.ThemePresetOverrides[name];
+	if overrides then
+		for role,value in pairs(overrides) do
+			t[role] = typeof(value) == 'Color3' and value or Color3.fromHex(value);
+		end;
+	end;
 	return t;
 end;
 function NeverLose:ApplyTheme(name, scope)
