@@ -8774,8 +8774,76 @@ function NeverLose:CreateWindow(Config)
 		ConfigSignal:Connect(ConfigLib.SetRender);
 		ConfigLib.UnsafeThread = nil;
 		ConfigLib.SelectedConfig = "Default";
+		ConfigLib.AutoSave = false;
+		ConfigLib.AutoLoadLast = false;
+		ConfigLib.Loading = false;
+		ConfigLib.AutoSaveThread = nil;
+		local UpdateSize;
 
-		local UpdateSize = LPH_NO_VIRTUALIZE(function()
+		function ConfigLib:GetSelectedPath()
+			return Window.ConfigFolder..'/'..(ConfigLib.SelectedConfig or "Default");
+		end;
+
+		function ConfigLib:SaveSelected()
+			if ConfigLib.Loading then
+				return false;
+			end;
+
+			local path = ConfigLib:GetSelectedPath();
+			if not isfile(path) then
+				return false;
+			end;
+
+			writefile(path, ConfigLib:GetData());
+			writefile(Window.ConfigFolder..'/LastConfig', ConfigLib.SelectedConfig or "Default");
+
+			return true;
+		end;
+
+		function ConfigLib:LoadSelected(name)
+			name = tostring(name or ConfigLib.SelectedConfig or "Default");
+
+			local path = Window.ConfigFolder..'/'..name;
+			if not isfile(path) then
+				return false;
+			end;
+
+			ConfigLib.Loading = true;
+			ConfigLib.SelectedConfig = name;
+			ConfigName.Text = name;
+
+			local ok = pcall(function()
+				ConfigLib:LoadData(readfile(path));
+			end);
+
+			ConfigLib.Loading = false;
+
+			if not ok then
+				return false;
+			end;
+
+			writefile(Window.ConfigFolder..'/LastConfig', name);
+			UpdateSize();
+			ConfigLib:RefreshConfig();
+
+			return true;
+		end;
+
+		function ConfigLib:LoadLast()
+			local last_path = Window.ConfigFolder..'/LastConfig';
+			local name = "Default";
+
+			if isfile(last_path) then
+				local success, result = pcall(readfile, last_path);
+				if success and type(result) == 'string' and result ~= '' then
+					name = result;
+				end;
+			end;
+
+			return ConfigLib:LoadSelected(name);
+		end;
+
+		UpdateSize = LPH_NO_VIRTUALIZE(function()
 			local size = NeverLose:MeasureText(ConfigName.Text, ConfigName.TextSize, ConfigName.FontFace,Vector2.new(math.huge,math.huge));
 
 			NeverLose.PlayAnimate(ConfigFrame,SlowyTween , {
@@ -8858,7 +8926,9 @@ function NeverLose:CreateWindow(Config)
 
 				local name = string.sub(v , #Window.ConfigFolder + 2);
 
-				table.insert(ConfigList , name)
+				if name ~= "LastConfig" then
+					table.insert(ConfigList , name)
+				end;
 			end;
 
 			for i,ConfigNameStr in next , ConfigList do
@@ -9063,22 +9133,9 @@ function NeverLose:CreateWindow(Config)
 
 
 				local _,load_signal = NeverLose:CreateInput(LoadConfig,function()
-					local path = Window.ConfigFolder..'/'..ConfigNameStr;
-
-					if isfile(path) then
-						local data = readfile(path);
-
-						ConfigLib:LoadData(data);
-
-						ConfigLib.SelectedConfig = ConfigNameStr;
-						ConfigName.Text = ConfigNameStr;
-
-						UpdateSize();
-
-						ConfigLib:RefreshConfig();
-
+					if ConfigLib:LoadSelected(ConfigNameStr) then
 						Logging.new("folder",'Loaded '..tostring(ConfigNameStr),3.5)
-					end
+					end;
 				end);
 
 				table.insert(ConfigLib.Signals , signal);
@@ -9119,11 +9176,7 @@ function NeverLose:CreateWindow(Config)
 
 
 		local hover_write = NeverLose:CreateInput(ConfigIcon,function()
-			local path = Window.ConfigFolder..'/'..(ConfigLib.SelectedConfig or "Default");
-
-			if isfile(path) then
-				writefile(Window.ConfigFolder..'/'..(ConfigLib.SelectedConfig or "Default"),ConfigLib:GetData());
-
+			if ConfigLib:SaveSelected() then
 				Logging.new("folder",'Saved '..tostring(ConfigLib.SelectedConfig),3.5)
 			end;
 		end);
@@ -9150,6 +9203,7 @@ function NeverLose:CreateWindow(Config)
 				writefile(Window.ConfigFolder..'/'..cfg_name,ConfigLib:GetData());
 				ConfigLib.SelectedConfig = cfg_name;
 				ConfigName.Text = cfg_name;
+				writefile(Window.ConfigFolder..'/LastConfig', cfg_name);
 
 				Logging.new("folder",'Created '..tostring(cfg_name),3.5)
 
@@ -9173,7 +9227,29 @@ function NeverLose:CreateWindow(Config)
 			})
 		end))
 
+		ConfigLib.AutoSaveThread = task.spawn(function()
+			local previousData = nil;
+
+			while NeverLose.ScreenGui and NeverLose.ScreenGui.Parent do
+				task.wait(0.5);
+
+				if ConfigLib.AutoSave and not ConfigLib.Loading then
+					local success, currentData = pcall(function()
+						return ConfigLib:GetData();
+					end);
+
+					if success and currentData ~= previousData then
+						if ConfigLib:SaveSelected() then
+							previousData = currentData;
+						end;
+					end;
+				end;
+			end;
+		end);
+		NeverLose.ConfigAutoSaveThread = ConfigLib.AutoSaveThread;
+
 		ConfigLib:RefreshConfig();
+		Window.ConfigLib = ConfigLib;
 
 		OpenButton.MouseButton1Click:Connect(LPH_NO_VIRTUALIZE(function()
 			if NeverLose:CanUsePointer(OpenButton) then ConfigSignal:SetValue(true); end;
@@ -9812,6 +9888,36 @@ function NeverLose:CreateWindow(Config)
 			end;
 		end)));
 
+		UtilitySection:AddLabel('Auto save'):AddToggle({
+			Default = false,
+			Flag = 'UI.Config.AutoSave',
+			Callback = function(value)
+				if Window.ConfigLib then
+					Window.ConfigLib.AutoSave = value;
+					if value then
+						Window.ConfigLib:SaveSelected();
+					end;
+				end;
+			end
+		});
+
+		UtilitySection:AddLabel('Load last config'):AddToggle({
+			Default = false,
+			Flag = 'UI.Config.AutoLoadLast',
+			Callback = function(value)
+				if Window.ConfigLib then
+					Window.ConfigLib.AutoLoadLast = value;
+					if value then
+						task.defer(function()
+							if Window.ConfigLib and Window.ConfigLib.AutoLoadLast then
+								Window.ConfigLib:LoadLast();
+							end;
+						end);
+					end;
+				end;
+			end
+		});
+
 		UtilitySection:AddButton({
 			Icon = 'trash-can',
 			Name = 'Unload menu',
@@ -9824,6 +9930,11 @@ function NeverLose:CreateWindow(Config)
 	end;
 
 	Window:BuildSettings();
+	task.defer(function()
+		if Window.ConfigLib and Window.ConfigLib.AutoLoadLast then
+			Window.ConfigLib:LoadLast();
+		end;
+	end);
 
 	Window:SetRender(false);
 
@@ -10388,6 +10499,11 @@ end;
 function NeverLose:Unload()
 	if not NeverLose.UnloadEnabled then
 		return;	
+	end;
+
+	if NeverLose.ConfigAutoSaveThread then
+		task.cancel(NeverLose.ConfigAutoSaveThread);
+		NeverLose.ConfigAutoSaveThread = nil;
 	end;
 
 	NeverLose:DestroyGlows(); NeverLose:FinishMotion();
