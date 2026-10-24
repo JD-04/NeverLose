@@ -14,82 +14,107 @@ local LOAD_ENV = LPH_NO_VIRTUALIZE(function()
 
 		BaseWorkspace.Name = 'PRI\0.'..tostring(string.char(math.random(50,120)))..tostring(string.char(math.random(50,120)))..tostring(string.char(math.random(50,120)))..tostring(string.char(math.random(50,120)))..tostring(string.char(math.random(50,120)))..tostring(string.char(math.random(50,120)));
 
-		local __get_path_c = function(path)
-			return (string.find(path,'/',1,true) and string.split(path,'/')) or (string.find(path,'\\',1,true) and string.split(path,'\\')) or {path};
+		local __normalize_path = function(path)
+			local segments = {};
+			local raw = tostring(path or ''):gsub('\\','/');
+
+			for _,part in next , string.split(raw,'/') do
+				if part ~= '' and part ~= '.' then
+					table.insert(segments,part);
+				end;
+			end;
+
+			return segments;
 		end;
 
 		local __get_path = function(path)
-			local main = __get_path_c(path);
+			local node = BaseWorkspace;
 
-			local block = BaseWorkspace;
-
-			for i,v in next , main do
-				block = block[v];
+			for _,part in next , __normalize_path(path) do
+				node = node:FindFirstChild(part);
+				if not node then
+					return nil;
+				end;
 			end;
 
-			return block;
+			return node;
+		end;
+
+		local __get_parent = function(path , create_folders)
+			local parts = __normalize_path(path);
+			local leaf = table.remove(parts , #parts);
+			local node = BaseWorkspace;
+
+			for _,part in next , parts do
+				local child = node:FindFirstChild(part);
+
+				if not child then
+					if not create_folders then
+						return nil , nil;
+					end;
+
+					child = Instance.new('Folder');
+					child.Name = tostring(part);
+					child.Parent = node;
+				elseif not child:IsA('Folder') then
+					return nil , nil;
+				end;
+
+				node = child;
+			end;
+
+			return node , leaf;
 		end;
 
 		getgenv().readfile = function(path)
-			local path : StringValue = __get_path(path);
+			local file = __get_path(path);
+			if not file or not file:IsA('StringValue') then
+				error('File does not exist');
+			end;
 
-			return path.Value;
+			return file.Value;
 		end;
 
 		getgenv().isfile = function(path)
-			local success , message = pcall(function()
-				return __get_path(path);
-			end);
-
-			if success and not message:IsA("Folder") then
-				return true;
-			end;
-
-			return false;
+			local item = __get_path(path);
+			return item and item:IsA('StringValue') or false;
 		end;
 
 		getgenv().isfolder = function(path)
-			local success , message = pcall(function()
-				return __get_path(path);
-			end);
-
-			if success and message:IsA("Folder") then
-				return true;
-			end;
-
-			return false;
+			local item = __get_path(path);
+			return item and item:IsA('Folder') or false;
 		end;
 
 		getgenv().writefile = function(path,content)
-			local main = __get_path_c(path);
-
-			local block = BaseWorkspace;
-
-			for i,v in next , main do
-				local item = block:FindFirstChild(v);
-				if not item then
-					local c = Instance.new('StringValue',block);
-
-					c.Name = tostring(v);
-					c.Value = content;
-				else
-					if item:IsA('StringValue') and tostring(item) == v then
-						item.Name = tostring(v);
-						item.Value = content;
-					end;
-
-					block = item;
-				end;
+			local parent , leaf = __get_parent(path , true);
+			if not parent or not leaf then
+				error('Invalid path');
 			end;
+
+			local item = parent:FindFirstChild(leaf);
+			if item and item:IsA('Folder') then
+				error('Cannot write file over folder');
+			end;
+
+			if not item then
+				item = Instance.new('StringValue');
+				item.Name = tostring(leaf);
+				item.Parent = parent;
+			end;
+
+			item.Value = tostring(content or '');
 		end;
 
 		getgenv().listfiles = function(path)
 			local fold = __get_path(path);
 			local pa = {};
+			if not fold or not fold:IsA('Folder') then
+				return pa;
+			end;
 
 			for i,v in next , fold:GetChildren() do
 				if v:IsA('StringValue') then
-					table.insert(pa,path..'/'..tostring(v));
+					table.insert(pa,tostring(path)..'/'..v.Name);
 				end;
 			end;
 
@@ -97,34 +122,25 @@ local LOAD_ENV = LPH_NO_VIRTUALIZE(function()
 		end;
 
 		getgenv().makefolder = function(path)
-			local main = __get_path_c(path);
-
 			local block = BaseWorkspace;
-
-			for i,v in next , main do
-				local item = block:FindFirstChild(v);
+			for _,part in next , __normalize_path(path) do
+				local item = block:FindFirstChild(part);
 				if not item then
-					local c = Instance.new('Folder',block);
-
-					c.Name = tostring(v);
-				else
-					block = item;
+					item = Instance.new('Folder');
+					item.Name = tostring(part);
+					item.Parent = block;
+				elseif not item:IsA('Folder') then
+					error('Cannot create folder over file');
 				end;
+
+				block = item;
 			end;
 		end;
 
 		getgenv().delfile = function(path)
-			local main = __get_path_c(path);
-
-			local block = BaseWorkspace;
-
-			for i,v in next , main do
-				local item = block:FindFirstChild(v);
-				if item and item:IsA('StringValue') then
-					item:Destroy();
-				else
-					block = item;
-				end;
+			local item = __get_path(path);
+			if item and item:IsA('StringValue') then
+				item:Destroy();
 			end;
 		end;
 	end;
@@ -8777,53 +8793,268 @@ function NeverLose:CreateWindow(Config)
 		ConfigLib.AutoSave = false;
 		ConfigLib.AutoLoadLast = false;
 		ConfigLib.Loading = false;
+		ConfigLib.Saving = false;
 		ConfigLib.AutoSaveThread = nil;
+		ConfigLib._LastSavedData = nil;
+		ConfigLib._LastSavedPath = nil;
+		ConfigLib._FormatPrefix = 'NL2:';
+		ConfigLib._FormatVersion = 2;
+		ConfigLib._MaxConfigNameLength = 48;
 		local UpdateSize;
+		local LAST_CONFIG_FILE = 'LastConfig';
 
-		function ConfigLib:GetSelectedPath()
-			return Window.ConfigFolder..'/'..(ConfigLib.SelectedConfig or "Default");
+		local function EnsureConfigFolder()
+			local success , result = pcall(function()
+				if not isfolder(Window.ConfigFolder) then
+					makefolder(Window.ConfigFolder);
+				end;
+			end);
+
+			if not success then
+				return false , 'Failed to create config folder: '..tostring(result);
+			end;
+
+			return true;
 		end;
 
-		function ConfigLib:SaveSelected()
-			if ConfigLib.Loading then
-				return false;
+		local function GetFileName(path)
+			local raw = tostring(path or ''):gsub('\\','/');
+			local chunks = string.split(raw,'/');
+			return chunks[#chunks] or raw;
+		end;
+
+		local function SanitizeConfigName(name)
+			name = tostring(name or ''):gsub('^%s+',''):gsub('%s+$','');
+			if name == '' then
+				return nil , 'Config name is empty';
 			end;
 
-			local path = ConfigLib:GetSelectedPath();
-			if not isfile(path) then
-				return false;
+			if #name > ConfigLib._MaxConfigNameLength then
+				return nil , 'Config name is too long';
 			end;
 
-			writefile(path, ConfigLib:GetData());
-			writefile(Window.ConfigFolder..'/LastConfig', ConfigLib.SelectedConfig or "Default");
+			if name == '.' or name == '..' then
+				return nil , 'Invalid config name';
+			end;
+
+			if name:find('[%c]') or name:find('[\\/]',1) then
+				return nil , 'Config name contains invalid characters';
+			end;
+
+			return name;
+		end;
+
+		local function GetConfigPath(name)
+			local safe_name , err = SanitizeConfigName(name);
+			if not safe_name then
+				return nil , err;
+			end;
+
+			return Window.ConfigFolder..'/'..safe_name , nil , safe_name;
+		end;
+
+		local function SerializeValue(value , seen)
+			local value_type = typeof(value);
+
+			if value_type == 'Color3' then
+				return {
+					__nlcfg_type_v2 = 'Color3',
+					hex = value:ToHex(),
+				};
+			end;
+
+			if value_type == 'table' then
+				seen = seen or {};
+				if seen[value] then
+					return nil , 'Cyclic table is not supported';
+				end;
+
+				seen[value] = true;
+				local output = {};
+
+				for k,v in next , value do
+					local key_type = typeof(k);
+					if key_type ~= 'string' and key_type ~= 'number' then
+						seen[value] = nil;
+						return nil , 'Unsupported table key type: '..tostring(key_type);
+					end;
+
+					local packed , pack_err = SerializeValue(v , seen);
+					if pack_err then
+						seen[value] = nil;
+						return nil , pack_err;
+					end;
+
+					output[k] = packed;
+				end;
+
+				seen[value] = nil;
+				return output;
+			end;
+
+			if value_type == 'nil' or value_type == 'boolean' or value_type == 'number' or value_type == 'string' then
+				return value;
+			end;
+
+			return nil , 'Unsupported value type: '..tostring(value_type);
+		end;
+
+		local function DeserializeValue(value)
+			if typeof(value) ~= 'table' then
+				return value;
+			end;
+
+			if value.__nlcfg_type_v2 == 'Color3' and type(value.hex) == 'string' then
+				local success , color = pcall(Color3.fromHex , value.hex);
+				if success then
+					return color;
+				end;
+
+				return nil , 'Invalid Color3 value';
+			end;
+
+			local output = {};
+			for k,v in next , value do
+				local unpacked , unpack_err = DeserializeValue(v);
+				if unpack_err then
+					return nil , unpack_err;
+				end;
+
+				output[k] = unpacked;
+			end;
+
+			return output;
+		end;
+
+		local function CloneSerializableValue(value)
+			local packed , pack_err = SerializeValue(value , {});
+			if pack_err then
+				return nil , pack_err;
+			end;
+
+			return DeserializeValue(packed);
+		end;
+
+		function ConfigLib:GetSelectedPath()
+			local path = GetConfigPath(ConfigLib.SelectedConfig or 'Default');
+			return path or (Window.ConfigFolder..'/Default');
+		end;
+
+		function ConfigLib:WriteLastConfig(name)
+			local safe_name , err = SanitizeConfigName(name or ConfigLib.SelectedConfig or 'Default');
+			if not safe_name then
+				return false , err;
+			end;
+
+			local ok , folder_err = EnsureConfigFolder();
+			if not ok then
+				return false , folder_err;
+			end;
+
+			local success , write_err = pcall(writefile , Window.ConfigFolder..'/'..LAST_CONFIG_FILE , safe_name);
+			if not success then
+				return false , 'Failed to write LastConfig: '..tostring(write_err);
+			end;
+
+			return true;
+		end;
+
+		function ConfigLib:SaveSelected(precomputed_data)
+			if ConfigLib.Loading or ConfigLib.Saving then
+				return false , 'Config system is busy';
+			end;
+
+			local ok , folder_err = EnsureConfigFolder();
+			if not ok then
+				return false , folder_err;
+			end;
+
+			local path , path_err , safe_name = GetConfigPath(ConfigLib.SelectedConfig or 'Default');
+			if not path then
+				return false , path_err;
+			end;
+
+			local data = precomputed_data;
+			local data_err = nil;
+			if type(data) ~= 'string' then
+				data , data_err = ConfigLib:GetData();
+			end;
+			if not data then
+				return false , data_err;
+			end;
+
+			local file_exists = false;
+			local exists_ok , exists_result = pcall(function()
+				return isfile(path);
+			end);
+			if exists_ok and exists_result then
+				file_exists = true;
+			end;
+
+			if file_exists and ConfigLib._LastSavedPath == path and ConfigLib._LastSavedData == data then
+				ConfigLib:WriteLastConfig(safe_name);
+				return true , 'unchanged';
+			end;
+
+			ConfigLib.Saving = true;
+			local write_ok , write_err = pcall(writefile , path , data);
+			ConfigLib.Saving = false;
+
+			if not write_ok then
+				return false , 'Failed to save config: '..tostring(write_err);
+			end;
+
+			ConfigLib._LastSavedPath = path;
+			ConfigLib._LastSavedData = data;
+			ConfigLib.SelectedConfig = safe_name;
+
+			local _, last_err = ConfigLib:WriteLastConfig(safe_name);
+			if last_err then
+				return false , last_err;
+			end;
 
 			return true;
 		end;
 
 		function ConfigLib:LoadSelected(name)
-			name = tostring(name or ConfigLib.SelectedConfig or "Default");
-
-			local path = Window.ConfigFolder..'/'..name;
-			if not isfile(path) then
-				return false;
+			if ConfigLib.Loading or ConfigLib.Saving then
+				return false , 'Config system is busy';
 			end;
+
+			local path , path_err , safe_name = GetConfigPath(name or ConfigLib.SelectedConfig or 'Default');
+			if not path then
+				return false , path_err;
+			end;
+
+			if not isfile(path) then
+				return false , 'Config "'..tostring(safe_name)..'" does not exist';
+			end;
+
+			local success , file_data = pcall(readfile , path);
+			if not success then
+				return false , 'Failed to read config: '..tostring(file_data);
+			end;
+
+			local previous_name = ConfigLib.SelectedConfig;
+			local previous_text = ConfigName.Text;
 
 			ConfigLib.Loading = true;
-			ConfigLib.SelectedConfig = name;
-			ConfigName.Text = name;
-
-			local ok = pcall(function()
-				ConfigLib:LoadData(readfile(path));
-			end);
-
+			local loaded_ok , load_err = ConfigLib:LoadData(file_data);
 			ConfigLib.Loading = false;
 
-			if not ok then
-				return false;
+			if not loaded_ok then
+				ConfigLib.SelectedConfig = previous_name;
+				ConfigName.Text = previous_text;
+				UpdateSize();
+				return false , load_err;
 			end;
 
-			writefile(Window.ConfigFolder..'/LastConfig', name);
+			ConfigLib.SelectedConfig = safe_name;
+			ConfigName.Text = safe_name;
+			ConfigLib._LastSavedPath = path;
+			ConfigLib._LastSavedData = file_data;
 			UpdateSize();
+			ConfigLib:WriteLastConfig(safe_name);
 			ConfigLib:RefreshConfig();
 
 			return true;
@@ -8836,7 +9067,10 @@ function NeverLose:CreateWindow(Config)
 			if isfile(last_path) then
 				local success, result = pcall(readfile, last_path);
 				if success and type(result) == 'string' and result ~= '' then
-					name = result;
+					local safe_name = SanitizeConfigName(result);
+					if safe_name then
+						name = safe_name;
+					end;
 				end;
 			end;
 
@@ -8854,24 +9088,28 @@ function NeverLose:CreateWindow(Config)
 		UpdateSize();
 
 		function ConfigLib:GetData(performance)
+			-- Format v2:
+			-- NL2:<base64(encrypt(JSON({ Version = 2, Entries = { { Idx = <flag>, Value = <serialized> } } })))>
+			-- This keeps old base64+encryption transport while adding explicit versioning and safe value tags.
 			local ikc = {};
 			
 			local cd = 0;
 			for Flag,v in next , NeverLose.Flags do
 				if v and v.GetValue then
-					local data = v:GetValue();
-
-					if typeof(data) == 'Color3' then
-						table.insert(ikc,{
-							Idx = Flag,
-							Value = data:ToHex(),
-						});
-					else
-						table.insert(ikc,{
-							Idx = Flag,
-							Value = data
-						});
+					local value_ok , data = pcall(v.GetValue , v);
+					if not value_ok then
+						return nil , 'Failed to read flag "'..tostring(Flag)..'"';
 					end;
+
+					local serialized , serialize_err = SerializeValue(data , {});
+					if serialize_err then
+						return nil , 'Failed to serialize "'..tostring(Flag)..'": '..tostring(serialize_err);
+					end;
+
+					table.insert(ikc,{
+						Idx = Flag,
+						Value = serialized
+					});
 				end;
 				
 				if performance then
@@ -8883,30 +9121,159 @@ function NeverLose:CreateWindow(Config)
 				cd += 1;
 			end;
 
-			return NeverLose.Base64Encode(Encryption.new(HttpService:JSONEncode(ikc)));
+			local payload = {
+				Version = ConfigLib._FormatVersion,
+				Entries = ikc,
+			};
+
+			local ok , encoded_or_err = pcall(function()
+				return ConfigLib._FormatPrefix..NeverLose.Base64Encode(Encryption.new(HttpService:JSONEncode(payload)));
+			end);
+
+			if not ok then
+				return nil , 'Failed to encode config payload: '..tostring(encoded_or_err);
+			end;
+
+			return encoded_or_err;
 		end;
 
 		function ConfigLib:LoadData(data)
-			local coded = HttpService:JSONDecode(Encryption.reverse(NeverLose.Base64Decode(data)));
+			if type(data) ~= 'string' then
+				return false , 'Config data is not a string';
+			end;
 
-			for i,v in next , coded do
-				if v.Idx then
-					if NeverLose.Flags[v.Idx] then
-						task.spawn(function()
-							NeverLose.Flags[v.Idx]:SetValue(v.Value)
-						end)
+			local raw = data:gsub('^%s+',''):gsub('%s+$','');
+			if raw == '' then
+				return false , 'Config data is empty';
+			end;
+
+			local parse_ok , parsed_or_err = pcall(function()
+				local payload_raw = raw;
+				local format = 'legacy';
+
+				if payload_raw:sub(1 , #ConfigLib._FormatPrefix) == ConfigLib._FormatPrefix then
+					format = 'v2';
+					payload_raw = payload_raw:sub(#ConfigLib._FormatPrefix + 1);
+				end;
+
+				local decoded = NeverLose.Base64Decode(payload_raw);
+				if decoded == '' then
+					error('Base64 decode returned empty payload');
+				end;
+
+				local decrypted = Encryption.reverse(decoded);
+				local coded = HttpService:JSONDecode(decrypted);
+
+				if format == 'v2' then
+					if type(coded) ~= 'table' or coded.Version ~= ConfigLib._FormatVersion or type(coded.Entries) ~= 'table' then
+						error('Invalid v2 payload');
+					end;
+
+					return {
+						Entries = coded.Entries,
+						IsV2 = true
+					};
+				end;
+
+				if type(coded) ~= 'table' then
+					error('Invalid legacy payload');
+				end;
+
+				return {
+					Entries = coded,
+					IsV2 = false
+				};
+			end);
+
+			if not parse_ok then
+				return false , 'Failed to decode config: '..tostring(parsed_or_err);
+			end;
+
+			local entries = parsed_or_err.Entries or {};
+			local is_v2 = parsed_or_err.IsV2 == true;
+
+			local snapshots = {};
+			local apply_queue = {};
+
+			for _,entry in next , entries do
+				if type(entry) == 'table' and entry.Idx then
+					local flag = NeverLose.Flags[entry.Idx];
+					if flag and flag.SetValue then
+						local value = entry.Value;
+						if is_v2 then
+							local unpacked , unpack_err = DeserializeValue(value);
+							if unpack_err then
+								return false , 'Invalid value for "'..tostring(entry.Idx)..'": '..tostring(unpack_err);
+							end;
+
+							value = unpacked;
+						end;
+
+						local snapshot_ok , current_value = pcall(flag.GetValue , flag);
+						if snapshot_ok then
+							local cloned_value , clone_err = CloneSerializableValue(current_value);
+							if not clone_err then
+								snapshots[entry.Idx] = {
+									HasValue = true,
+									Value = cloned_value
+								};
+							end;
+						end;
+
+						table.insert(apply_queue , {
+							Idx = entry.Idx,
+							Flag = flag,
+							Value = value
+						});
 					end;
 				end;
 			end;
+
+			for _,item in next , apply_queue do
+				local success , set_err = pcall(item.Flag.SetValue , item.Flag , item.Value);
+				if not success then
+					for rollback_idx,snapshot in next , snapshots do
+						local rollback_flag = NeverLose.Flags[rollback_idx];
+						if snapshot.HasValue and rollback_flag and rollback_flag.SetValue then
+							pcall(rollback_flag.SetValue , rollback_flag , snapshot.Value);
+						end;
+					end;
+
+					return false , 'Failed to apply "'..tostring(item.Idx)..'": '..tostring(set_err);
+				end;
+			end;
+
+			return true;
 		end;
 
 		function ConfigLib:RefreshConfig()
-			if not isfolder(Window.ConfigFolder) then
-				makefolder(Window.ConfigFolder);
+			local ok , ensure_err = EnsureConfigFolder();
+			if not ok then
+				return false , ensure_err;
 			end;
-			
-			if not isfile(Window.ConfigFolder..'/Default') then
-				writefile(Window.ConfigFolder..'/Default',ConfigLib:GetData());
+
+			local default_path = Window.ConfigFolder..'/Default';
+			if not isfile(default_path) then
+				local default_data , default_err = ConfigLib:GetData(true);
+				if not default_data then
+					local fallback_ok , fallback_data = pcall(function()
+						return ConfigLib._FormatPrefix..NeverLose.Base64Encode(Encryption.new(HttpService:JSONEncode({
+							Version = ConfigLib._FormatVersion,
+							Entries = {}
+						})));
+					end);
+
+					if not fallback_ok then
+						return false , default_err;
+					end;
+
+					default_data = fallback_data;
+				end;
+
+				local default_ok , write_err = pcall(writefile , default_path , default_data);
+				if not default_ok then
+					return false , 'Failed to create default config: '..tostring(write_err);
+				end;
 			end;
 			
 			for i,v in next,ConfigMenu:GetChildren() do
@@ -8922,14 +9289,41 @@ function NeverLose:CreateWindow(Config)
 			table.clear(ConfigLib.Signals);
 
 			local ConfigList = {};
-			for i,v in next , listfiles(Window.ConfigFolder) do
+			local file_list = {};
+			local file_ok , file_err = pcall(function()
+				file_list = listfiles(Window.ConfigFolder) or {};
+			end);
+			if not file_ok then
+				return false , 'Failed to list configs: '..tostring(file_err);
+			end;
 
-				local name = string.sub(v , #Window.ConfigFolder + 2);
+			local listed = {};
+			for _,file_path in next , file_list do
+				local name = GetFileName(file_path);
+				local _, _, safe_name = GetConfigPath(name);
+				local file_exists = false;
+				if safe_name and safe_name ~= LAST_CONFIG_FILE and not listed[safe_name] then
+					local ok_primary , exists_primary = pcall(isfile , file_path);
+					local ok_fallback , exists_fallback = pcall(isfile , Window.ConfigFolder..'/'..safe_name);
+					file_exists = (ok_primary and exists_primary) or (ok_fallback and exists_fallback) or false;
+				end;
 
-				if name ~= "LastConfig" then
-					table.insert(ConfigList , name)
+				if safe_name and safe_name ~= LAST_CONFIG_FILE and not listed[safe_name] and file_exists then
+					listed[safe_name] = true;
+					table.insert(ConfigList , safe_name);
 				end;
 			end;
+
+			table.sort(ConfigList , function(a,b)
+				return tostring(a):lower() < tostring(b):lower();
+			end);
+
+			if not table.find(ConfigList , ConfigLib.SelectedConfig) then
+				ConfigLib.SelectedConfig = table.find(ConfigList , 'Default') and 'Default' or (ConfigList[1] or 'Default');
+			end;
+
+			ConfigName.Text = ConfigLib.SelectedConfig;
+			UpdateSize();
 
 			for i,ConfigNameStr in next , ConfigList do
 				local ConfigItemFrame = Instance.new("Frame")
@@ -9122,19 +9516,40 @@ function NeverLose:CreateWindow(Config)
 						return;
 					end;
 					
-					delfile(Window.ConfigFolder..'/'..ConfigNameStr);
+					local path , path_err = GetConfigPath(ConfigNameStr);
+					if not path then
+						Logging.new("circle-alert",tostring(path_err),3.5)
+						return;
+					end;
+
+					local removed , remove_err = pcall(delfile , path);
+					if not removed then
+						Logging.new("circle-alert",'Delete failed: '..tostring(remove_err),3.5)
+						return;
+					end;
+
+					if ConfigLib.SelectedConfig == ConfigNameStr then
+						ConfigLib.SelectedConfig = "Default";
+					end;
 
 					UpdateSize();
 
-					ConfigLib:RefreshConfig();
+					local refresh_ok , refresh_err = ConfigLib:RefreshConfig();
+					if not refresh_ok then
+						Logging.new("circle-alert",tostring(refresh_err),3.5)
+						return;
+					end;
 
 					Logging.new("trash-can",'Deleted '..tostring(ConfigNameStr),3.5)
 				end);
 
 
 				local _,load_signal = NeverLose:CreateInput(LoadConfig,function()
-					if ConfigLib:LoadSelected(ConfigNameStr) then
+					local loaded , load_err = ConfigLib:LoadSelected(ConfigNameStr);
+					if loaded then
 						Logging.new("folder",'Loaded '..tostring(ConfigNameStr),3.5)
+					else
+						Logging.new("circle-alert",tostring(load_err or 'Failed to load config'),3.5)
 					end;
 				end);
 
@@ -9171,13 +9586,17 @@ function NeverLose:CreateWindow(Config)
 			end;
 
 			table.clear(ConfigList);
+			return true;
 		end;
 		
 
 
 		local hover_write = NeverLose:CreateInput(ConfigIcon,function()
-			if ConfigLib:SaveSelected() then
+			local saved , save_err = ConfigLib:SaveSelected();
+			if saved then
 				Logging.new("folder",'Saved '..tostring(ConfigLib.SelectedConfig),3.5)
+			else
+				Logging.new("circle-alert",tostring(save_err or 'Failed to save config'),3.5)
 			end;
 		end);
 
@@ -9197,21 +9616,40 @@ function NeverLose:CreateWindow(Config)
 		local mv = NeverLose:CreateInput(LoadConfig , function()
 			local cfg_name = TextBox.Text;
 
-			if cfg_name and cfg_name:byte() and not cfg_name:find('/',1,true) and not cfg_name:find('\\',1,true) then
-				cfg_name = string.sub(cfg_name , 1 , 24);
+			local path , name_err , safe_name = GetConfigPath(cfg_name);
+			if not path then
+				Logging.new("circle-alert",tostring(name_err),3.5)
+				return;
+			end;
 
-				writefile(Window.ConfigFolder..'/'..cfg_name,ConfigLib:GetData());
-				ConfigLib.SelectedConfig = cfg_name;
-				ConfigName.Text = cfg_name;
-				writefile(Window.ConfigFolder..'/LastConfig', cfg_name);
+			local data , data_err = ConfigLib:GetData();
+			if not data then
+				Logging.new("circle-alert",tostring(data_err),3.5)
+				return;
+			end;
 
-				Logging.new("folder",'Created '..tostring(cfg_name),3.5)
+			local existed = isfile(path);
+			local write_ok , write_err = pcall(writefile , path , data);
+			if not write_ok then
+				Logging.new("circle-alert",'Failed to write config: '..tostring(write_err),3.5)
+				return;
+			end;
 
-				TextBox.Text = "";
+			ConfigLib.SelectedConfig = safe_name;
+			ConfigLib._LastSavedPath = path;
+			ConfigLib._LastSavedData = data;
+			ConfigName.Text = safe_name;
+			ConfigLib:WriteLastConfig(safe_name);
 
-				UpdateSize();
+			Logging.new("folder",(existed and 'Updated ' or 'Created ')..tostring(safe_name),3.5)
 
-				ConfigLib:RefreshConfig();
+			TextBox.Text = "";
+
+			UpdateSize();
+
+			local refresh_ok , refresh_err = ConfigLib:RefreshConfig();
+			if not refresh_ok then
+				Logging.new("circle-alert",tostring(refresh_err),3.5)
 			end;
 		end);
 
@@ -9228,20 +9666,20 @@ function NeverLose:CreateWindow(Config)
 		end))
 
 		ConfigLib.AutoSaveThread = task.spawn(function()
-			local previousData = nil;
+			local previousData = ConfigLib._LastSavedData;
 
 			while NeverLose.ScreenGui and NeverLose.ScreenGui.Parent do
 				task.wait(0.5);
 
-				if ConfigLib.AutoSave and not ConfigLib.Loading then
-					local success, currentData = pcall(function()
-						return ConfigLib:GetData();
-					end);
-
-					if success and currentData ~= previousData then
-						if ConfigLib:SaveSelected() then
+				if ConfigLib.AutoSave and not ConfigLib.Loading and not ConfigLib.Saving then
+					local currentData , data_err = ConfigLib:GetData(true);
+					if currentData and currentData ~= previousData then
+						local saved = ConfigLib:SaveSelected(currentData);
+						if saved then
 							previousData = currentData;
 						end;
+					elseif data_err then
+						task.wait(0.5);
 					end;
 				end;
 			end;
