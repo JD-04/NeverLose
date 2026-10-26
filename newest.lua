@@ -6459,12 +6459,138 @@ function NeverLose:GetKeybindList()
 	return ListLib;
 end;
 
+function NeverLose:DestroyFloatingToggleButton()
+	local FloatingToggle = NeverLose.__FloatingToggle;
+	if not FloatingToggle then
+		return;
+	end;
+
+	if FloatingToggle.Connections then
+		for _,connection in ipairs(FloatingToggle.Connections) do
+			if connection then
+				pcall(connection.Disconnect, connection);
+			end;
+		end;
+	end;
+
+	if FloatingToggle.Gui then
+		pcall(function()
+			FloatingToggle.Gui:Destroy();
+		end);
+	end;
+
+	NeverLose.__FloatingToggle = nil;
+end;
+
+function NeverLose:SetFloatingToggleEnabled(State)
+	NeverLose.__FloatingToggleEnabled = (State ~= false);
+
+	if NeverLose.__FloatingToggle and NeverLose.__FloatingToggle.Button then
+		NeverLose.__FloatingToggle.Button.Visible = NeverLose.__FloatingToggleEnabled;
+	end;
+end;
+
+function NeverLose:CreateFloatingToggleButton(Window)
+	NeverLose:DestroyFloatingToggleButton();
+
+	local FloatingGui = Instance.new('ScreenGui');
+	ProtectGui(FloatingGui);
+
+	FloatingGui.Name = NeverLose.RandomString();
+	FloatingGui.IgnoreGuiInset = true;
+	FloatingGui.ZIndexBehavior = Enum.ZIndexBehavior.Global;
+	FloatingGui.ResetOnSpawn = false;
+	FloatingGui.Parent = CoreGui;
+
+	local ToggleButton = Instance.new('ImageButton');
+	ToggleButton.Name = NeverLose.RandomString();
+	ToggleButton.AnchorPoint = Vector2.new(1, 0);
+	ToggleButton.Size = UDim2.fromOffset(58, 58);
+	ToggleButton.Position = UDim2.new(1, -78, 0, 20);
+	ToggleButton.BackgroundTransparency = 1;
+	ToggleButton.Image = Window.Logo or NeverLose.GlobalLogo;
+	ToggleButton.ZIndex = 2147483646;
+	ToggleButton.Parent = FloatingGui;
+
+	local Corner = Instance.new('UICorner');
+	Corner.CornerRadius = UDim.new(1, 0);
+	Corner.Parent = ToggleButton;
+
+	local Connections = {};
+	local function addConnection(connection)
+		table.insert(Connections, connection);
+		return connection;
+	end;
+
+	local dragging = false;
+	local dragInput = nil;
+	local dragStart = nil;
+	local startPos = nil;
+
+	local function stopDrag()
+		dragging = false;
+		dragInput = nil;
+		dragStart = nil;
+		startPos = nil;
+	end;
+
+	-- Keep drag movement in sync for both mouse and touch input.
+	addConnection(ToggleButton.InputBegan:Connect(function(input)
+		local inputType = input.UserInputType;
+		if inputType == Enum.UserInputType.MouseButton1 or inputType == Enum.UserInputType.Touch then
+			dragging = true;
+			dragInput = input;
+			dragStart = input.Position;
+			startPos = ToggleButton.Position;
+		end;
+	end));
+
+	addConnection(ToggleButton.InputChanged:Connect(function(input)
+		local inputType = input.UserInputType;
+		if inputType == Enum.UserInputType.MouseMovement or inputType == Enum.UserInputType.Touch then
+			dragInput = input;
+		end;
+	end));
+
+	addConnection(UserInputService.InputChanged:Connect(function(input)
+		if dragging and dragInput and dragStart and startPos and input == dragInput then
+			local delta = input.Position - dragStart;
+			ToggleButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y);
+		end;
+	end));
+
+	addConnection(UserInputService.InputEnded:Connect(function(input)
+		if dragging and (input == dragInput or input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) then
+			stopDrag();
+		end;
+	end));
+
+	addConnection(UserInputService.WindowFocusReleased:Connect(stopDrag));
+
+	addConnection(ToggleButton.MouseButton1Click:Connect(function()
+		if NeverLose:CanUsePointer(ToggleButton) then
+			Window:ToggleInterface();
+		end;
+	end));
+
+	NeverLose.__FloatingToggle = {
+		Gui = FloatingGui,
+		Button = ToggleButton,
+		Connections = Connections
+	};
+
+	NeverLose:SetFloatingToggleEnabled(NeverLose.__FloatingToggleEnabled);
+end;
+
 function NeverLose:CreateWindow(Config)
+	local InitialConfig = Config or {};
+	local IsTouchDevice = UserInputService.TouchEnabled;
+	local DefaultWindowSize = IsTouchDevice and NeverLose.Scales.Mobile or NeverLose.Scales.Default;
 	Config = NeverLose:ProcessParams(Config , {
 		Logo = NeverLose.GlobalLogo,
 		Name = "Neverlose",
 		Content = "Counter-Strike 2",
-		Size = NeverLose.Scales.Default,
+		Size = DefaultWindowSize,
 		ConfigFolder = "NeverLoseConfigs",
 		Enable3DRenderer = false,
 		Keybind = "Insert"
@@ -6480,7 +6606,8 @@ function NeverLose:CreateWindow(Config)
 		Tabs = {},
 		CurrentTab = 1,
 		Keybind = Config.Keybind,
-		Enable3DRenderer = Config.Enable3DRenderer
+		Enable3DRenderer = Config.Enable3DRenderer,
+		FloatingToggleEnabled = (InitialConfig.FloatingToggleEnabled ~= false)
 	};
 
 	NeverLose.GlobalLogo = Window.Logo;
@@ -9756,6 +9883,23 @@ function NeverLose:CreateWindow(Config)
 		end;
 	end;
 
+	function Window:SetFloatingToggleEnabled(State)
+		self.FloatingToggleEnabled = (State ~= false);
+		NeverLose:SetFloatingToggleEnabled(self.FloatingToggleEnabled);
+	end;
+
+	function Window:DestroyFloatingToggle()
+		self.FloatingToggleEnabled = false;
+		NeverLose:SetFloatingToggleEnabled(false);
+		NeverLose:DestroyFloatingToggleButton();
+	end;
+
+	if Window.FloatingToggleEnabled then
+		NeverLose:CreateFloatingToggleButton(Window);
+	else
+		NeverLose:DestroyFloatingToggleButton();
+	end;
+
 	function Window:Watermark()
 		if NeverLose.__WatermarkCache then
 			return NeverLose.__WatermarkCache;
@@ -10944,6 +11088,8 @@ function NeverLose:Unload()
 		NeverLose.ConfigAutoSaveThread = nil;
 	end;
 
+	NeverLose:SetFloatingToggleEnabled(false);
+	NeverLose:DestroyFloatingToggleButton();
 	NeverLose:DestroyGlows(); NeverLose:FinishMotion();
 	NeverLose.ScreenGui:Destroy();
 
