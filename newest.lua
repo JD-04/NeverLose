@@ -6506,7 +6506,13 @@ function NeverLose:CreateFloatingToggleButton(Window)
 	ToggleButton.Name = NeverLose.RandomString();
 	ToggleButton.AnchorPoint = Vector2.new(1, 0);
 	ToggleButton.Size = UDim2.fromOffset(58, 58);
-	ToggleButton.Position = UDim2.new(1, -78, 0, 20);
+	local savedPosition = Window.FloatingTogglePosition;
+	ToggleButton.Position = UDim2.new(
+		tonumber(savedPosition and savedPosition.XScale) or 1,
+		math.floor(tonumber(savedPosition and savedPosition.XOffset) or -78),
+		tonumber(savedPosition and savedPosition.YScale) or 0,
+		math.floor(tonumber(savedPosition and savedPosition.YOffset) or 20)
+	);
 	ToggleButton.BackgroundTransparency = 1;
 	ToggleButton.Image = Window.Logo or NeverLose.GlobalLogo;
 	ToggleButton.ZIndex = 2147483646;
@@ -6556,6 +6562,15 @@ function NeverLose:CreateFloatingToggleButton(Window)
 		if dragging and dragInput and dragStart and startPos and input == dragInput then
 			local delta = input.Position - dragStart;
 			ToggleButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y);
+			if Window.StoreSetting then
+				local position = ToggleButton.Position;
+				Window:StoreSetting('FloatingToggle.Position' , {
+					XScale = position.X.Scale,
+					XOffset = position.X.Offset,
+					YScale = position.Y.Scale,
+					YOffset = position.Y.Offset
+				});
+			end;
 		end;
 	end));
 
@@ -6610,10 +6625,294 @@ function NeverLose:CreateWindow(Config)
 		FloatingToggleEnabled = (InitialConfig.FloatingToggleEnabled ~= false)
 	};
 
+	local function ColorToHex(value)
+		return typeof(value) == 'Color3' and value:ToHex() or nil;
+	end;
+
+	local function DecodeColor(value)
+		if typeof(value) == 'Color3' then
+			return value;
+		end;
+
+		if type(value) == 'string' and #value >= 6 then
+			local success , color = pcall(Color3.fromHex , value:gsub('#' , ''));
+
+			if success then
+				return color;
+			end;
+		end;
+
+		return nil;
+	end;
+
+	local function NormalizeKeybind(value)
+		if value == nil then
+			return nil;
+		end;
+
+		return tostring(typeof(value) == 'EnumItem' and value.Name or value);
+	end;
+
+	local function DeepCopy(value)
+		if type(value) ~= 'table' then
+			return value;
+		end;
+
+		local copied = {};
+
+		for key , item in pairs(value) do
+			copied[key] = DeepCopy(item);
+		end;
+
+		return copied;
+	end;
+
+	local function MergeTables(base , override)
+		local merged = DeepCopy(base);
+
+		if type(override) ~= 'table' then
+			return merged;
+		end;
+
+		for key , value in pairs(override) do
+			if type(value) == 'table' and type(merged[key]) == 'table' then
+				merged[key] = MergeTables(merged[key] , value);
+			else
+				merged[key] = DeepCopy(value);
+			end;
+		end;
+
+		return merged;
+	end;
+
+	local function SetByPath(root , path , value)
+		local node = root;
+		local segments = {};
+
+		for part in tostring(path):gmatch('[^%.]+') do
+			table.insert(segments , part);
+		end;
+
+		for index = 1 , #segments - 1 do
+			local key = segments[index];
+
+			if type(node[key]) ~= 'table' then
+				node[key] = {};
+			end;
+
+			node = node[key];
+		end;
+
+		node[segments[#segments]] = value;
+	end;
+
+	local function GetByPath(root , path)
+		local node = root;
+
+		for part in tostring(path):gmatch('[^%.]+') do
+			if type(node) ~= 'table' then
+				return nil;
+			end;
+
+			node = node[part];
+		end;
+
+		return node;
+	end;
+
+	local function GuessScaleName(size)
+		local offset = NeverLose:FitWindowSize(size);
+
+		for name , preset in pairs(NeverLose.Scales) do
+			local fitted = NeverLose:FitWindowSize(preset);
+
+			if math.abs(fitted.X.Offset - offset.X.Offset) <= 1 and math.abs(fitted.Y.Offset - offset.Y.Offset) <= 1 then
+				return name;
+			end;
+		end;
+
+		return 'Default';
+	end;
+
+	local function CaptureThemeColors()
+		local colors = {};
+
+		for role , color in pairs(NeverLose.Theme) do
+			colors[role] = ColorToHex(color);
+		end;
+
+		return colors;
+	end;
+
+	local function BuildDefaultUISettings()
+		return {
+			SchemaVersion = 1,
+			Menu = {Keybind = NormalizeKeybind(Window.Keybind) or 'Insert', Scale = GuessScaleName(Window.Size), SidebarWidth = 128, Render3D = Window.Enable3DRenderer and true or false, HideUsername = false},
+			Layout = {SectionGap = 12, CornerRadius = NeverLose.CornerRadius, LockSections = false, SnapGrid = false},
+			Motion = {Enabled = NeverLose.Motion.Enabled, Style = NeverLose.Motion.Style, Direction = NeverLose.Motion.Direction, PopupEffect = NeverLose.Motion.PopupEffect, FadeTime = NeverLose.Motion.FadeTime},
+			Glow = {Enabled = NeverLose.Glow.Enabled, Icons = NeverLose.Glow.Icons, Sliders = NeverLose.Glow.Sliders, Toggles = NeverLose.Glow.Toggles, Tabs = NeverLose.Glow.Tabs, ColorMode = NeverLose.Glow.ColorMode, Color = ColorToHex(NeverLose.Glow.Color), IconMode = NeverLose.Glow.IconMode, Intensity = NeverLose.Glow.Intensity, BlurRadius = NeverLose.Glow.BlurRadius, Spread = NeverLose.Glow.Spread, HoverBoost = NeverLose.Glow.HoverBoost, OffsetX = NeverLose.Glow.OffsetX, OffsetY = NeverLose.Glow.OffsetY, MaxVisible = NeverLose.Glow.MaxVisible},
+			Typography = {Font = 'InterMedium.ttf', Scale = NeverLose.FontScale or 1},
+			Theme = {Scope = NeverLose.ThemeScope or 'Full UI', Preset = NeverLose.ThemeName or 'Dracula', ElementPreset = NeverLose.ElementPresetName or 'None', Colors = CaptureThemeColors(), MenuTransparency = 0.055, ContentTransparency = 0.080, SectionTransparency = NeverLose:GetSectionTransparency()},
+			Background = {Source = '', Enabled = true, Opacity = 1, Dim = 0.35, Tint = ColorToHex(Color3.new(1 , 1 , 1)), Fit = 'Crop'},
+			KeybindList = {Enabled = true, ShowAllInMenu = true},
+			Watermark = {Enabled = true, Username = true, FPS = true, Ping = true, Time = false},
+			FloatingToggle = {Enabled = Window.FloatingToggleEnabled ~= false, Position = {XScale = 1, XOffset = -78, YScale = 0, YOffset = 20}}
+		};
+	end;
+
+	-- Settings persistence is isolated from ConfigLib using a dedicated namespace and schema.
+	local SettingsStore = {
+		Namespace = 'NeverLoseSettingsUI',
+		Path = 'NeverLoseSettingsUI/settings_v1.json',
+		SchemaVersion = 1,
+		SaveDelay = 0.25,
+		Enabled = type(readfile) == 'function' and type(writefile) == 'function' and type(isfile) == 'function' and type(isfolder) == 'function' and type(makefolder) == 'function',
+		Loaded = false,
+		Applying = false,
+		SaveTask = nil,
+		State = BuildDefaultUISettings()
+	};
+
+	function Window:QueueSettingsSave()
+		local store = self.SettingsStore;
+
+		if not store or not store.Enabled or store.Applying then
+			return;
+		end;
+
+		if store.SaveTask then
+			task.cancel(store.SaveTask);
+		end;
+
+		-- Debounced save avoids disk writes on every UI tick while keeping changes persistent.
+		store.SaveTask = task.delay(store.SaveDelay , function()
+			store.SaveTask = nil;
+			self:FlushSettingsSave(false);
+		end);
+	end;
+
+	function Window:FlushSettingsSave(force)
+		local store = self.SettingsStore;
+
+		if not store or not store.Enabled then
+			return false;
+		end;
+
+		if force and store.SaveTask then
+			task.cancel(store.SaveTask);
+			store.SaveTask = nil;
+		end;
+
+		local payload = DeepCopy(store.State);
+		payload.SchemaVersion = store.SchemaVersion;
+
+		local encoded_ok , encoded = pcall(HttpService.JSONEncode , HttpService , payload);
+
+		if not encoded_ok then
+			return false;
+		end;
+
+		local folder_ok = pcall(function()
+			if not isfolder(store.Namespace) then
+				makefolder(store.Namespace);
+			end;
+		end);
+
+		if not folder_ok then
+			return false;
+		end;
+
+		local write_ok = pcall(writefile , store.Path , encoded);
+
+		return write_ok and true or false;
+	end;
+
+	function Window:ShutdownSettingsPersistence()
+		local store = self.SettingsStore;
+
+		if not store then
+			return;
+		end;
+
+		if store.SaveTask then
+			task.cancel(store.SaveTask);
+			store.SaveTask = nil;
+		end;
+
+		self:FlushSettingsSave(true);
+	end;
+
+	function Window:StoreSetting(path , value , skipSave)
+		if not self.SettingsStore then
+			return;
+		end;
+
+		SetByPath(self.SettingsStore.State , path , value);
+
+		if not skipSave and not self.SettingsStore.Applying then
+			self:QueueSettingsSave();
+		end;
+	end;
+
+	function Window:CaptureThemeSettings(skipSave)
+		self:StoreSetting('Theme.Scope' , NeverLose.ThemeScope or 'Full UI' , true);
+		self:StoreSetting('Theme.Preset' , NeverLose.ThemeName or 'Custom' , true);
+		self:StoreSetting('Theme.ElementPreset' , NeverLose.ElementPresetName or 'None' , true);
+		self:StoreSetting('Theme.Colors' , CaptureThemeColors() , true);
+
+		if not skipSave then
+			self:QueueSettingsSave();
+		end;
+	end;
+
+	function Window:LoadSettingsState()
+		local store = self.SettingsStore;
+
+		if not store or store.Loaded then
+			return store and store.State or nil;
+		end;
+
+		store.Loaded = true;
+
+		if not store.Enabled then
+			return store.State;
+		end;
+
+		local file_ok , file_exists = pcall(isfile , store.Path);
+
+		if not file_ok or not file_exists then
+			return store.State;
+		end;
+
+		local read_ok , raw = pcall(readfile , store.Path);
+
+		if not read_ok or type(raw) ~= 'string' then
+			return store.State;
+		end;
+
+		local decode_ok , parsed = pcall(HttpService.JSONDecode , HttpService , raw);
+
+		if not decode_ok or type(parsed) ~= 'table' then
+			return store.State;
+		end;
+
+		store.State = MergeTables(store.State , parsed);
+
+		return store.State;
+	end;
+
+	Window.SettingsStore = SettingsStore;
+	Window:LoadSettingsState();
+	Window.Keybind = NormalizeKeybind(GetByPath(SettingsStore.State , 'Menu.Keybind')) or Window.Keybind;
+	Window.FloatingToggleEnabled = (GetByPath(SettingsStore.State , 'FloatingToggle.Enabled') ~= false);
+	Window.FloatingTogglePosition = DeepCopy(GetByPath(SettingsStore.State , 'FloatingToggle.Position'));
+	NeverLose.__SettingsWindows = NeverLose.__SettingsWindows or setmetatable({} , {__mode = 'k'});
+	NeverLose.__SettingsWindows[Window] = true;
+
 	NeverLose.GlobalLogo = Window.Logo;
 
 	local Logging = NeverLose:CreateLogger();
-	if not isfolder(Window.ConfigFolder) then
+	if type(isfolder) == 'function' and type(makefolder) == 'function' and not isfolder(Window.ConfigFolder) then
 		makefolder(Window.ConfigFolder);
 	end;
 
@@ -9886,11 +10185,13 @@ function NeverLose:CreateWindow(Config)
 	function Window:SetFloatingToggleEnabled(State)
 		self.FloatingToggleEnabled = (State ~= false);
 		NeverLose:SetFloatingToggleEnabled(self.FloatingToggleEnabled);
+		if self.StoreSetting then
+			self:StoreSetting('FloatingToggle.Enabled' , self.FloatingToggleEnabled);
+		end;
 	end;
 
 	function Window:DestroyFloatingToggle()
-		self.FloatingToggleEnabled = false;
-		NeverLose:SetFloatingToggleEnabled(false);
+		self:SetFloatingToggleEnabled(false);
 		NeverLose:DestroyFloatingToggleButton();
 	end;
 
@@ -10217,6 +10518,38 @@ function NeverLose:CreateWindow(Config)
 		end;
 
 		local SavedOrder = Window.__Order or 0;
+		local SettingsState = (Window.SettingsStore and Window.SettingsStore.State) or {};
+		local function StateValue(path, fallback)
+			local value = GetByPath(SettingsState, path);
+			if value == nil then
+				return fallback;
+			end;
+			return value;
+		end;
+		local function BoolValue(path, fallback)
+			local value = StateValue(path, nil);
+			if type(value) == 'boolean' then
+				return value;
+			end;
+			return fallback;
+		end;
+		local function NumberValue(path, fallback, min, max)
+			local value = tonumber(StateValue(path, nil));
+			if not value or value ~= value then
+				return fallback;
+			end;
+			if min ~= nil and max ~= nil then
+				value = math.clamp(value, min, max);
+			end;
+			return value;
+		end;
+		local function StringValue(path, fallback)
+			local value = StateValue(path, nil);
+			if type(value) == 'string' and #value > 0 then
+				return value;
+			end;
+			return fallback;
+		end;
 
 		Window.__Order = 8999;
 
@@ -10235,6 +10568,8 @@ function NeverLose:CreateWindow(Config)
 
 		local KeybindList = NeverLose:GetKeybindList();
 		local WatermarkData = Window:SetupWatermark();
+		local SettingsControls = {};
+		Window.SettingsControls = SettingsControls;
 
 		WatermarkData.Lib:SetRender(true);
 
@@ -10251,51 +10586,89 @@ function NeverLose:CreateWindow(Config)
 			Line = true
 		});
 
-		MenuSection:AddLabel('Menu keybind'):AddKeybind({
-			Default = Window.Keybind or 'Insert',
+		SettingsControls.MenuKeybind = MenuSection:AddLabel('Menu keybind'):AddKeybind({
+			Default = NormalizeKeybind(Window.Keybind) or 'Insert',
 			Callback = function(value)
-				Window.Keybind = value;
+				Window.Keybind = NormalizeKeybind(value) or Window.Keybind;
+				Window:StoreSetting('Menu.Keybind', Window.Keybind);
 			end
 		});
 
-		MenuSection:AddLabel('Menu scale'):AddDropdown({
-			Default = 'Default',
+		SettingsControls.MenuScale = MenuSection:AddLabel('Menu scale'):AddDropdown({
+			Default = StringValue('Menu.Scale', GuessScaleName(Window.Size)),
 			Values = { 'Small' , 'Mobile' , 'Default' , 'Large' },
 			Size = 95,
 			Callback = function(value)
 				Window:SetSize(NeverLose.Scales[value] or NeverLose.Scales.Default);
+				Window:StoreSetting('Menu.Scale', value);
 			end
 		});
 
-		MenuSection:AddLabel('3D menu'):AddToggle({
-			Default = false,
+		SettingsControls.Render3D = MenuSection:AddLabel('3D menu'):AddToggle({
+			Default = BoolValue('Menu.Render3D', false),
 			Callback = function(value)
 				Window:Set3DRender(value);
+				Window:StoreSetting('Menu.Render3D', value and true or false);
 			end
 		});
 
-		MenuSection:AddLabel('Watermark'):AddToggle({
-			Default = true,
+		SettingsControls.WatermarkEnabled = MenuSection:AddLabel('Watermark'):AddToggle({
+			Default = BoolValue('Watermark.Enabled', true),
 			Callback = function(value)
 				WatermarkData.Lib:SetRender(value);
+				Window:StoreSetting('Watermark.Enabled', value and true or false);
 			end
 		});
 
-		MenuSection:AddLabel('Sidebar width'):AddSlider({Default=128,Min=112,Max=176,Type='px',Rounding=0,Size=125,Callback=function(v) Window:SetSidebarWidth(v); end});
-		MenuSection:AddLabel('Hide username'):AddToggle({Default=false,Callback=function(v) Window:SetAccount({Username=v and 'MirageHub' or LocalPlayer.Name,Expires=Window.Expires}); end});
+		SettingsControls.SidebarWidth = MenuSection:AddLabel('Sidebar width'):AddSlider({Default=NumberValue('Menu.SidebarWidth', Window.SidebarWidth or 128, 112, 176),Min=112,Max=176,Type='px',Rounding=0,Size=125,Callback=function(v)
+			Window:SetSidebarWidth(v);
+			Window:StoreSetting('Menu.SidebarWidth', Window.SidebarWidth);
+		end});
+		SettingsControls.HideUsername = MenuSection:AddLabel('Hide username'):AddToggle({Default=BoolValue('Menu.HideUsername', false),Callback=function(v)
+			Window:SetAccount({Username=v and 'MirageHub' or LocalPlayer.Name,Expires=Window.Expires});
+			Window:StoreSetting('Menu.HideUsername', v and true or false);
+		end});
 		local LayoutSection=SettingsTab:AddSection({Name='Layout',Icon='frame-corners',Position='left'});
-		LayoutSection:AddLabel('Section spacing'):AddSlider({Default=12,Min=8,Max=24,Type='px',Size=125,Callback=function(v) Window:SetSectionGap(v); end});
-		LayoutSection:AddLabel('Corner radius'):AddSlider({Default=8,Min=0,Max=14,Type='px',Size=125,Callback=function(v) NeverLose:SetCornerRadius(v); end});
-		LayoutSection:AddLabel('Lock sections'):AddToggle({Default=false,Callback=function(v) Window.SectionWorkspace.Locked=v; if v then Window.SectionWorkspace:Finish(true); end; end});
-		LayoutSection:AddLabel('Snap to 8px grid'):AddToggle({Default=false,Callback=function(v) Window.SectionWorkspace.Grid=v and 8 or 1; end});
+		SettingsControls.SectionSpacing = LayoutSection:AddLabel('Section spacing'):AddSlider({Default=NumberValue('Layout.SectionGap', 12, 8, 24),Min=8,Max=24,Type='px',Size=125,Callback=function(v)
+			Window:SetSectionGap(v);
+			Window:StoreSetting('Layout.SectionGap', v);
+		end});
+		SettingsControls.CornerRadius = LayoutSection:AddLabel('Corner radius'):AddSlider({Default=NumberValue('Layout.CornerRadius', NeverLose.CornerRadius, 0, 14),Min=0,Max=14,Type='px',Size=125,Callback=function(v)
+			NeverLose:SetCornerRadius(v);
+			Window:StoreSetting('Layout.CornerRadius', NeverLose.CornerRadius);
+		end});
+		SettingsControls.LockSections = LayoutSection:AddLabel('Lock sections'):AddToggle({Default=BoolValue('Layout.LockSections', false),Callback=function(v)
+			Window.SectionWorkspace.Locked=v;
+			if v then Window.SectionWorkspace:Finish(true); end;
+			Window:StoreSetting('Layout.LockSections', v and true or false);
+		end});
+		SettingsControls.SnapGrid = LayoutSection:AddLabel('Snap to 8px grid'):AddToggle({Default=BoolValue('Layout.SnapGrid', false),Callback=function(v)
+			Window.SectionWorkspace.Grid=v and 8 or 1;
+			Window:StoreSetting('Layout.SnapGrid', v and true or false);
+		end});
 		LayoutSection:AddButton({Name='Reset section layout',Icon='two-arrows-loop-clockwise',Callback=function() Window:ResetSectionLayout(); end});
 		local AnimationSection=SettingsTab:AddSection({Name='Animations',Icon='play-large',Position='right',Open=false});
 		local MotionControls={};
-		MotionControls.Enabled=AnimationSection:AddLabel('Enable animations'):AddToggle({Default=NeverLose.Motion.Enabled,Flag='UI.Motion.Enabled',Callback=function(v) NeverLose:SetMotionOption('Enabled',v); end});
-		MotionControls.Style=AnimationSection:AddLabel('Animation type'):AddDropdown({Default=NeverLose.Motion.Style,Values=NeverLose.MotionStyles,Size=130,Flag='UI.Motion.Style',Callback=function(v) NeverLose:SetMotionOption('Style',v); end});
-		MotionControls.Direction=AnimationSection:AddLabel('Easing direction'):AddDropdown({Default=NeverLose.Motion.Direction,Values=NeverLose.MotionDirections,Size=130,Flag='UI.Motion.Direction',Callback=function(v) NeverLose:SetMotionOption('Direction',v); end});
-		MotionControls.PopupEffect=AnimationSection:AddLabel('Popup animation'):AddDropdown({Default=NeverLose.Motion.PopupEffect,Values=NeverLose.PopupEffects,Size=130,Flag='UI.Motion.PopupEffect',Callback=function(v) NeverLose:SetMotionOption('PopupEffect',v); end});
-		MotionControls.FadeTime=AnimationSection:AddLabel('Fade time'):AddSlider({Default=NeverLose.Motion.FadeTime,Min=0,Max=1,Type='s',Rounding=3,Size=125,Flag='UI.Motion.FadeTime',Callback=function(v) NeverLose:SetMotionOption('FadeTime',v); end});
+		MotionControls.Enabled=AnimationSection:AddLabel('Enable animations'):AddToggle({Default=BoolValue('Motion.Enabled', NeverLose.Motion.Enabled),Flag='UI.Motion.Enabled',Callback=function(v)
+			NeverLose:SetMotionOption('Enabled',v);
+			Window:StoreSetting('Motion.Enabled', v and true or false);
+		end});
+		MotionControls.Style=AnimationSection:AddLabel('Animation type'):AddDropdown({Default=StringValue('Motion.Style', NeverLose.Motion.Style),Values=NeverLose.MotionStyles,Size=130,Flag='UI.Motion.Style',Callback=function(v)
+			NeverLose:SetMotionOption('Style',v);
+			Window:StoreSetting('Motion.Style', v);
+		end});
+		MotionControls.Direction=AnimationSection:AddLabel('Easing direction'):AddDropdown({Default=StringValue('Motion.Direction', NeverLose.Motion.Direction),Values=NeverLose.MotionDirections,Size=130,Flag='UI.Motion.Direction',Callback=function(v)
+			NeverLose:SetMotionOption('Direction',v);
+			Window:StoreSetting('Motion.Direction', v);
+		end});
+		MotionControls.PopupEffect=AnimationSection:AddLabel('Popup animation'):AddDropdown({Default=StringValue('Motion.PopupEffect', NeverLose.Motion.PopupEffect),Values=NeverLose.PopupEffects,Size=130,Flag='UI.Motion.PopupEffect',Callback=function(v)
+			NeverLose:SetMotionOption('PopupEffect',v);
+			Window:StoreSetting('Motion.PopupEffect', v);
+		end});
+		MotionControls.FadeTime=AnimationSection:AddLabel('Fade time'):AddSlider({Default=NumberValue('Motion.FadeTime', NeverLose.Motion.FadeTime, 0, 1),Min=0,Max=1,Type='s',Rounding=3,Size=125,Flag='UI.Motion.FadeTime',Callback=function(v)
+			NeverLose:SetMotionOption('FadeTime',v);
+			Window:StoreSetting('Motion.FadeTime', NeverLose.Motion.FadeTime);
+		end});
 		AnimationSection:AddLabel('0 = instant; default = 0.175s');
 		AnimationSection:AddButton({Name='Reset animations',Icon='two-arrows-loop-clockwise',Callback=function()
 			MotionControls.Style:SetValue('Original'); MotionControls.Direction:SetValue('Original'); MotionControls.PopupEffect:SetValue('Scale'); MotionControls.FadeTime:SetValue(0.175); MotionControls.Enabled:SetValue(true);
@@ -10305,13 +10678,28 @@ function NeverLose:CreateWindow(Config)
 		table.insert(NeverLose.GlowHooks,function(text) GlowStatus:SetText(text); end);
 		local GlowControls={};
 		for _,entry in ipairs({{'Enabled','Enable glow'},{'Icons','Icons'},{'Sliders','Slider fill'},{'Toggles','Enabled toggles'},{'Tabs','Active tab indicators'}}) do
-			local key=entry[1]; GlowControls[key]=GlowSection:AddLabel(entry[2]):AddToggle({Default=NeverLose.Glow[key],Flag='UI.Glow.'..key,Callback=function(v) NeverLose:SetGlowOption(key,v); end});
+			local key=entry[1]; GlowControls[key]=GlowSection:AddLabel(entry[2]):AddToggle({Default=BoolValue('Glow.'..key, NeverLose.Glow[key]),Flag='UI.Glow.'..key,Callback=function(v)
+				NeverLose:SetGlowOption(key,v);
+				Window:StoreSetting('Glow.'..key, v and true or false);
+			end});
 		end;
-		GlowControls.ColorMode=GlowSection:AddLabel('Glow color'):AddDropdown({Default=NeverLose.Glow.ColorMode,Values={'Element','Accent','Custom'},Size=130,Flag='UI.Glow.ColorMode',Callback=function(v) NeverLose:SetGlowOption('ColorMode',v); end});
-		GlowControls.Color=GlowSection:AddLabel('Custom glow color'):AddColorPicker({Default=NeverLose.Glow.Color,Flag='UI.Glow.Color',Callback=function(v) NeverLose:SetGlowOption('Color',v); end});
-		GlowControls.IconMode=GlowSection:AddLabel('Icon glow'):AddDropdown({Default=NeverLose.Glow.IconMode,Values={'On hover','Always'},Size=130,Flag='UI.Glow.IconMode',Callback=function(v) NeverLose:SetGlowOption('IconMode',v); end});
+		GlowControls.ColorMode=GlowSection:AddLabel('Glow color'):AddDropdown({Default=StringValue('Glow.ColorMode', NeverLose.Glow.ColorMode),Values={'Element','Accent','Custom'},Size=130,Flag='UI.Glow.ColorMode',Callback=function(v)
+			NeverLose:SetGlowOption('ColorMode',v);
+			Window:StoreSetting('Glow.ColorMode', v);
+		end});
+		GlowControls.Color=GlowSection:AddLabel('Custom glow color'):AddColorPicker({Default=DecodeColor(StateValue('Glow.Color', ColorToHex(NeverLose.Glow.Color))) or NeverLose.Glow.Color,Flag='UI.Glow.Color',Callback=function(v)
+			NeverLose:SetGlowOption('Color',v);
+			Window:StoreSetting('Glow.Color', ColorToHex(v));
+		end});
+		GlowControls.IconMode=GlowSection:AddLabel('Icon glow'):AddDropdown({Default=StringValue('Glow.IconMode', NeverLose.Glow.IconMode),Values={'On hover','Always'},Size=130,Flag='UI.Glow.IconMode',Callback=function(v)
+			NeverLose:SetGlowOption('IconMode',v);
+			Window:StoreSetting('Glow.IconMode', v);
+		end});
 		for _,entry in ipairs({{'Intensity','Intensity',0,100,'%',100},{'BlurRadius','Blur radius',0,30,'px',1},{'Spread','Spread',-6,8,'px',1},{'HoverBoost','Hover boost',0,50,'%',100},{'OffsetX','Offset X',-12,12,'px',1},{'OffsetY','Offset Y',-12,12,'px',1},{'MaxVisible','Visible effect limit',8,80,'',1}}) do
-			local key,scale=entry[1],entry[6]; GlowControls[key]=GlowSection:AddLabel(entry[2]):AddSlider({Default=NeverLose.Glow[key]*scale,Min=entry[3],Max=entry[4],Type=entry[5],Rounding=0,Size=125,Flag='UI.Glow.'..key,Callback=function(v) NeverLose:SetGlowOption(key,v/scale); end});
+			local key,scale=entry[1],entry[6]; GlowControls[key]=GlowSection:AddLabel(entry[2]):AddSlider({Default=NumberValue('Glow.'..key, NeverLose.Glow[key], entry[3]/scale, entry[4]/scale)*scale,Min=entry[3],Max=entry[4],Type=entry[5],Rounding=0,Size=125,Flag='UI.Glow.'..key,Callback=function(v)
+				NeverLose:SetGlowOption(key,v/scale);
+				Window:StoreSetting('Glow.'..key, NeverLose.Glow[key]);
+			end});
 		end;
 		GlowSection:AddButton({Name='Reset glow',Icon='two-arrows-loop-clockwise',Callback=function()
 			for key,value in pairs({Enabled=true,Icons=true,Sliders=true,Toggles=true,Tabs=true,ColorMode='Element',IconMode='On hover',Intensity=28,BlurRadius=12,Spread=0,HoverBoost=12,OffsetX=0,OffsetY=0,MaxVisible=64}) do GlowControls[key]:SetValue(value); end;
@@ -10320,14 +10708,23 @@ function NeverLose:CreateWindow(Config)
 		Window.MotionControls=MotionControls; Window.GlowControls=GlowControls;
 		local FontSection=SettingsTab:AddSection({Name='Typography',Icon='fountain-pen-nib',Position='left'});
 		local FontStatus=FontSection:AddLabel('Choose a font to preview');
-		local FontPicker=FontSection:AddLabel('Font'):AddDropdown({Default='Built-in',Values=NeverLose:GetFontOptions(),Size=170,Callback=function(name)
+		local FontPicker=FontSection:AddLabel('Font'):AddDropdown({Default=StringValue('Typography.Font', 'InterMedium.ttf'),Values=NeverLose:GetFontOptions(),Size=170,Callback=function(name)
 			FontStatus:SetText('Loading '..name);
 			task.spawn(function()
 				local success,message=NeverLose:SetUIFont(name); if message=='Superseded' then return; end;
-				if success then FontStatus:SetText(name=='ProggyClean.fon' and 'ProggyClean: TTF version loaded' or 'Active: '..name); else FontStatus:SetText('Unavailable; previous font kept'); warn(tostring(message)); end;
+				if success then
+					FontStatus:SetText(name=='ProggyClean.fon' and 'ProggyClean: TTF version loaded' or 'Active: '..name);
+					Window:StoreSetting('Typography.Font', NeverLose.FontName or name);
+				else
+					FontStatus:SetText('Unavailable; previous font kept');
+					warn(tostring(message));
+				end;
 			end);
 		end});
-		FontSection:AddLabel('Text size'):AddSlider({Default=110,Min=85,Max=130,Type='%',Rounding=0,Size=125,Callback=function(v) NeverLose:SetFontScale(v/100); end});
+		SettingsControls.FontScale = FontSection:AddLabel('Text size'):AddSlider({Default=math.floor(NumberValue('Typography.Scale', NeverLose.FontScale or 1, 0.85, 1.30)*100+0.5),Min=85,Max=130,Type='%',Rounding=0,Size=125,Callback=function(v)
+			NeverLose:SetFontScale(v/100);
+			Window:StoreSetting('Typography.Scale', NeverLose.FontScale);
+		end});
 		FontSection:AddLabel('Aa Bb Cc 0123456789');
 		FontSection:AddButton({Name='Refresh font list',Icon='two-arrows-loop-clockwise',Callback=function()
 			FontStatus:SetText('Refreshing font list...'); task.spawn(function()
@@ -10349,37 +10746,87 @@ function NeverLose:CreateWindow(Config)
 			end);
 		end});
 		Window.FontPicker=FontPicker;
-		task.defer(function() FontPicker:SetValue('InterMedium.ttf'); end);
 		local ThemeSection=SettingsTab:AddSection({Name='Colors & themes',Icon='star',Position='left',Open=false});
-		ThemeSection:AddLabel('Preset target'):AddDropdown({Default='Full UI',Values=NeverLose.ThemeScopes,Size=140,Callback=function(v) NeverLose.ThemeScope=v; end});
-		local ElementPicker = ThemeSection:AddLabel('Element preset'):AddDropdown({Default='None',Values=NeverLose.ElementPresetOrder,Size=140,Callback=function(v) if v ~= NeverLose.ElementPresetName then NeverLose:ApplyElementPreset(v); end; end});
+		SettingsControls.ThemeScope = ThemeSection:AddLabel('Preset target'):AddDropdown({Default=StringValue('Theme.Scope', NeverLose.ThemeScope or 'Full UI'),Values=NeverLose.ThemeScopes,Size=140,Callback=function(v)
+			NeverLose.ThemeScope=v;
+			Window:CaptureThemeSettings();
+		end});
+		local ElementPicker = ThemeSection:AddLabel('Element preset'):AddDropdown({Default=StringValue('Theme.ElementPreset', NeverLose.ElementPresetName or 'None'),Values=NeverLose.ElementPresetOrder,Size=140,Callback=function(v)
+			if v ~= NeverLose.ElementPresetName then NeverLose:ApplyElementPreset(v); end;
+			Window:CaptureThemeSettings();
+		end});
 		NeverLose:BindThemeHook(function() if ElementPicker:GetValue() ~= NeverLose.ElementPresetName then ElementPicker:SetValue(NeverLose.ElementPresetName); end; end);
-		ThemeSection:AddLabel('Theme preset'):AddDropdown({Default='Dracula',Values=NeverLose.ThemePresetOrder,Size=140,Callback=function(v) NeverLose:ApplyTheme(v); end});
+		SettingsControls.ThemePreset = ThemeSection:AddLabel('Theme preset'):AddDropdown({Default=StringValue('Theme.Preset', NeverLose.ThemeName or 'Dracula'),Values=NeverLose.ThemePresetOrder,Size=140,Callback=function(v)
+			NeverLose:ApplyTheme(v);
+			Window:CaptureThemeSettings();
+		end});
 		local ThemeEditors={};
 		for _,entry in ipairs({{'Accent','Accent'},{'Slider fill','SliderFill'},{'Enabled switches','ToggleOn'},{'Active tabs','TabAccent'},{'Window','Window'},{'Sidebar','Sidebar'},{'Content','Content'},{'Sections','Section'},{'Controls','Control'},{'Hover','Hover'},{'Selection','Selected'},{'Borders','Border'},{'Text','Text'},{'Secondary text','MutedText'},{'Icons','Icon'},{'Slider / toggle knob','Knob'},{'Toggle off','ToggleOff'},{'Risk','Risk'}}) do
 			local role=entry[2];
-			ThemeEditors[role]=ThemeSection:AddLabel(entry[1]):AddColorPicker({Default=NeverLose.Theme[role],Callback=function(color) if not NeverLose:ColorsEqual(NeverLose.Theme[role],color) then NeverLose:SetThemeColor(role,color); end; end});
+			ThemeEditors[role]=ThemeSection:AddLabel(entry[1]):AddColorPicker({Default=DecodeColor(StateValue('Theme.Colors.'..role, ColorToHex(NeverLose.Theme[role]))) or NeverLose.Theme[role],Callback=function(color)
+				if not NeverLose:ColorsEqual(NeverLose.Theme[role],color) then NeverLose:SetThemeColor(role,color); end;
+				Window:CaptureThemeSettings();
+			end});
 		end;
 		NeverLose:BindThemeHook(function() for role,control in pairs(ThemeEditors) do if not NeverLose:ColorsEqual(control:GetValue(),NeverLose.Theme[role]) then control:SetValue(NeverLose.Theme[role]); end; end; end);
-		ThemeSection:AddLabel('Window transparency'):AddSlider({Default=5,Min=0,Max=90,Type='%',Rounding=0,Size=125,Callback=function(v) Window:SetMenuTransparency(v/100); end});
-		ThemeSection:AddLabel('Content transparency'):AddSlider({Default=10,Min=0,Max=100,Type='%',Rounding=0,Size=125,Callback=function(v) Window:SetContentTransparency(v/100); end});
-		ThemeSection:AddLabel('Section transparency'):AddSlider({Default=25,Min=0,Max=95,Type='%',Rounding=0,Size=125,Callback=function(v) NeverLose:SetSectionTransparency(v/100); end});
+		SettingsControls.MenuTransparency = ThemeSection:AddLabel('Window transparency'):AddSlider({Default=math.floor(NumberValue('Theme.MenuTransparency', Window.__MenuTransparency or 0.055, 0, 0.9)*100+0.5),Min=0,Max=90,Type='%',Rounding=0,Size=125,Callback=function(v)
+			Window:SetMenuTransparency(v/100);
+			Window:StoreSetting('Theme.MenuTransparency', Window.__MenuTransparency or (v/100));
+		end});
+		SettingsControls.ContentTransparency = ThemeSection:AddLabel('Content transparency'):AddSlider({Default=math.floor(NumberValue('Theme.ContentTransparency', Window.__ContentTransparency or 0.08, 0, 1)*100+0.5),Min=0,Max=100,Type='%',Rounding=0,Size=125,Callback=function(v)
+			Window:SetContentTransparency(v/100);
+			Window:StoreSetting('Theme.ContentTransparency', Window.__ContentTransparency or (v/100));
+		end});
+		SettingsControls.SectionTransparency = ThemeSection:AddLabel('Section transparency'):AddSlider({Default=math.floor(NumberValue('Theme.SectionTransparency', NeverLose:GetSectionTransparency(), 0, 0.95)*100+0.5),Min=0,Max=95,Type='%',Rounding=0,Size=125,Callback=function(v)
+			NeverLose:SetSectionTransparency(v/100);
+			Window:StoreSetting('Theme.SectionTransparency', NeverLose:GetSectionTransparency());
+		end});
 		local BackgroundSection=SettingsTab:AddSection({Name='Background image',Icon='image',Position='right'});
-		local PendingImage='';
+		local PendingImage=tostring(StringValue('Background.Source', '') or '');
 		local BackgroundStatus=BackgroundSection:AddLabel('Roblox ID, PNG/JPG URL or local file');
-		BackgroundSection:AddLabel('Image source'):AddTextInput({Default='',Placeholder='Paste ID / URL / path',Size=170,Callback=function(v) PendingImage=tostring(v); end});
+		SettingsControls.BackgroundSource=BackgroundSection:AddLabel('Image source'):AddTextInput({Default=PendingImage,Placeholder='Paste ID / URL / path',Size=170,Callback=function(v)
+			PendingImage=tostring(v);
+			Window:StoreSetting('Background.Source', PendingImage);
+		end});
 		BackgroundSection:AddButton({Name='Apply image',Icon='image',Callback=function()
 			BackgroundStatus:SetText('Loading background...'); task.spawn(function()
 				local success,message=Window:SetBackgroundImage(PendingImage); if message=='Superseded' then return; end;
+				if success then
+					Window:StoreSetting('Background.Source', PendingImage);
+				end;
 				BackgroundStatus:SetText(success and 'Background applied' or 'Image unavailable; previous image kept'); if not success then warn(tostring(message)); end;
 			end);
 		end});
-		BackgroundSection:AddButton({Name='Remove image',Icon='trash-can',Callback=function() Window:SetBackgroundImage(''); BackgroundStatus:SetText('Background removed'); end});
-		BackgroundSection:AddLabel('Show image'):AddToggle({Default=true,Callback=function(v) Window.Background.Enabled=v; Window:UpdateBackground(); end});
-		BackgroundSection:AddLabel('Image opacity'):AddSlider({Default=100,Min=0,Max=100,Type='%',Rounding=0,Size=125,Callback=function(v) Window.Background.Opacity=v/100; Window:UpdateBackground(); end});
-		BackgroundSection:AddLabel('Dark overlay'):AddSlider({Default=35,Min=0,Max=90,Type='%',Rounding=0,Size=125,Callback=function(v) Window.Background.Dim=v/100; Window:UpdateBackground(); end});
-		BackgroundSection:AddLabel('Image tint'):AddColorPicker({Default=Color3.new(1,1,1),Callback=function(v) Window.Background.Tint=v; Window:UpdateBackground(); end});
-		BackgroundSection:AddLabel('Image fit'):AddDropdown({Default='Crop',Values={'Crop','Stretch','Fit'},Size=110,Callback=function(v) Window.Background.Fit=v; Window:UpdateBackground(); end});
+		BackgroundSection:AddButton({Name='Remove image',Icon='trash-can',Callback=function()
+			Window:SetBackgroundImage('');
+			Window:StoreSetting('Background.Source', '');
+			BackgroundStatus:SetText('Background removed');
+		end});
+		SettingsControls.BackgroundEnabled=BackgroundSection:AddLabel('Show image'):AddToggle({Default=BoolValue('Background.Enabled', true),Callback=function(v)
+			Window.Background.Enabled=v;
+			Window:UpdateBackground();
+			Window:StoreSetting('Background.Enabled', v and true or false);
+		end});
+		SettingsControls.BackgroundOpacity=BackgroundSection:AddLabel('Image opacity'):AddSlider({Default=math.floor(NumberValue('Background.Opacity', 1, 0, 1)*100+0.5),Min=0,Max=100,Type='%',Rounding=0,Size=125,Callback=function(v)
+			Window.Background.Opacity=v/100;
+			Window:UpdateBackground();
+			Window:StoreSetting('Background.Opacity', Window.Background.Opacity);
+		end});
+		SettingsControls.BackgroundDim=BackgroundSection:AddLabel('Dark overlay'):AddSlider({Default=math.floor(NumberValue('Background.Dim', 0.35, 0, 0.9)*100+0.5),Min=0,Max=90,Type='%',Rounding=0,Size=125,Callback=function(v)
+			Window.Background.Dim=v/100;
+			Window:UpdateBackground();
+			Window:StoreSetting('Background.Dim', Window.Background.Dim);
+		end});
+		SettingsControls.BackgroundTint=BackgroundSection:AddLabel('Image tint'):AddColorPicker({Default=DecodeColor(StateValue('Background.Tint', 'FFFFFF')) or Color3.new(1,1,1),Callback=function(v)
+			Window.Background.Tint=v;
+			Window:UpdateBackground();
+			Window:StoreSetting('Background.Tint', ColorToHex(v));
+		end});
+		SettingsControls.BackgroundFit=BackgroundSection:AddLabel('Image fit'):AddDropdown({Default=StringValue('Background.Fit', 'Crop'),Values={'Crop','Stretch','Fit'},Size=110,Callback=function(v)
+			Window.Background.Fit=v;
+			Window:UpdateBackground();
+			Window:StoreSetting('Background.Fit', v);
+		end});
 
 		local KeybindSection = SettingsTab:AddSection({
 			Name = 'Keybinds',
@@ -10390,19 +10837,20 @@ function NeverLose:CreateWindow(Config)
 			Line = true
 		});
 
-		KeybindSection:AddLabel('Show keybind list'):AddToggle({
-			Default = true,
+		SettingsControls.KeybindListEnabled = KeybindSection:AddLabel('Show keybind list'):AddToggle({
+			Default = BoolValue('KeybindList.Enabled', true),
 			Callback = function(value)
 				KeybindList:SetEnabled(value);
+				Window:StoreSetting('KeybindList.Enabled', value and true or false);
 			end
 		});
 
-		KeybindSection:AddLabel('Show all in menu'):AddToggle({
-			Default = true,
+		SettingsControls.KeybindListShowAll = KeybindSection:AddLabel('Show all in menu'):AddToggle({
+			Default = BoolValue('KeybindList.ShowAllInMenu', true),
 			Callback = function(value)
 				KeybindList.AllowExpand = value;
-
 				KeybindList:SetExpanded(Window.Signal:GetValue());
+				Window:StoreSetting('KeybindList.ShowAllInMenu', value and true or false);
 			end
 		});
 
@@ -10414,31 +10862,35 @@ function NeverLose:CreateWindow(Config)
 			Open = true,
 			Line = true
 		});
-		WatermarkSection:AddLabel('Username'):AddToggle({
-			Default = true,
+		SettingsControls.WatermarkUsername = WatermarkSection:AddLabel('Username'):AddToggle({
+			Default = BoolValue('Watermark.Username', true),
 			Callback = function(value)
 				WatermarkData.SetItem('Username' , value);
+				Window:StoreSetting('Watermark.Username', value and true or false);
 			end
 		});
 
-		WatermarkSection:AddLabel('FPS'):AddToggle({
-			Default = true,
+		SettingsControls.WatermarkFPS = WatermarkSection:AddLabel('FPS'):AddToggle({
+			Default = BoolValue('Watermark.FPS', true),
 			Callback = function(value)
 				WatermarkData.SetItem('FPS' , value);
+				Window:StoreSetting('Watermark.FPS', value and true or false);
 			end
 		});
 
-		WatermarkSection:AddLabel('Ping'):AddToggle({
-			Default = true,
+		SettingsControls.WatermarkPing = WatermarkSection:AddLabel('Ping'):AddToggle({
+			Default = BoolValue('Watermark.Ping', true),
 			Callback = function(value)
 				WatermarkData.SetItem('Ping' , value);
+				Window:StoreSetting('Watermark.Ping', value and true or false);
 			end
 		});
 
-		WatermarkSection:AddLabel('Time'):AddToggle({
-			Default = false,
+		SettingsControls.WatermarkTime = WatermarkSection:AddLabel('Time'):AddToggle({
+			Default = BoolValue('Watermark.Time', false),
 			Callback = function(value)
 				WatermarkData.SetItem('Time' , value);
+				Window:StoreSetting('Watermark.Time', value and true or false);
 			end
 		});
 
@@ -10507,6 +10959,126 @@ function NeverLose:CreateWindow(Config)
 				NeverLose:Unload();
 			end
 		});
+
+		if not Window.__SettingsApplied then
+			Window.__SettingsApplied = true;
+			if Window.SettingsStore then
+				Window.SettingsStore.Applying = true;
+			end;
+
+			local applied_ok , applied_err = pcall(function()
+				local state = Window.SettingsStore and Window.SettingsStore.State or {};
+				local function ApplyControl(control, value, validator)
+					if not control or value == nil then
+						return;
+					end;
+					local function InList(list, value)
+						return type(value) == 'string' and table.find(list, value) ~= nil;
+					end;
+
+					if validator and not validator(value) then
+						return;
+					end;
+
+					pcall(function()
+						control:SetValue(value);
+					end);
+				end;
+
+			ApplyControl(SettingsControls.MenuKeybind, GetByPath(state, 'Menu.Keybind'), function(v) return type(v) == 'string' and #v > 0; end);
+			ApplyControl(SettingsControls.MenuScale, GetByPath(state, 'Menu.Scale'), function(v) return table.find({'Small','Mobile','Default','Large'}, v) ~= nil; end);
+			ApplyControl(SettingsControls.Render3D, GetByPath(state, 'Menu.Render3D'));
+			ApplyControl(SettingsControls.WatermarkEnabled, GetByPath(state, 'Watermark.Enabled'));
+			ApplyControl(SettingsControls.SidebarWidth, tonumber(GetByPath(state, 'Menu.SidebarWidth')));
+			ApplyControl(SettingsControls.HideUsername, GetByPath(state, 'Menu.HideUsername'));
+			ApplyControl(SettingsControls.SectionSpacing, tonumber(GetByPath(state, 'Layout.SectionGap')));
+			ApplyControl(SettingsControls.CornerRadius, tonumber(GetByPath(state, 'Layout.CornerRadius')));
+			ApplyControl(SettingsControls.LockSections, GetByPath(state, 'Layout.LockSections'));
+			ApplyControl(SettingsControls.SnapGrid, GetByPath(state, 'Layout.SnapGrid'));
+			for key,control in pairs(MotionControls) do
+				local value = GetByPath(state, 'Motion.'..key);
+				if key == 'Style' then
+					ApplyControl(control, value, function(v) return InList(NeverLose.MotionStyles, v); end);
+				elseif key == 'Direction' then
+					ApplyControl(control, value, function(v) return InList(NeverLose.MotionDirections, v); end);
+				elseif key == 'PopupEffect' then
+					ApplyControl(control, value, function(v) return InList(NeverLose.PopupEffects, v); end);
+				else
+					ApplyControl(control, value);
+				end;
+			end;
+			for key,control in pairs(GlowControls) do
+				if key == 'Color' then
+					ApplyControl(control, DecodeColor(GetByPath(state, 'Glow.Color')));
+				elseif key == 'ColorMode' then
+					ApplyControl(control, GetByPath(state, 'Glow.ColorMode'), function(v) return InList({'Element','Accent','Custom'}, v); end);
+				elseif key == 'IconMode' then
+					ApplyControl(control, GetByPath(state, 'Glow.IconMode'), function(v) return InList({'On hover','Always'}, v); end);
+				else
+					ApplyControl(control, GetByPath(state, 'Glow.'..key));
+				end;
+			end;
+			ApplyControl(FontPicker, GetByPath(state, 'Typography.Font'));
+			ApplyControl(SettingsControls.FontScale, tonumber(GetByPath(state, 'Typography.Scale')) and math.floor(math.clamp(tonumber(GetByPath(state, 'Typography.Scale')),0.85,1.30)*100+0.5) or nil);
+			ApplyControl(SettingsControls.ThemeScope, GetByPath(state, 'Theme.Scope'), function(v) return InList(NeverLose.ThemeScopes, v); end);
+			ApplyControl(SettingsControls.ThemePreset, GetByPath(state, 'Theme.Preset'), function(v) return InList(NeverLose.ThemePresetOrder, v); end);
+			ApplyControl(ElementPicker, GetByPath(state, 'Theme.ElementPreset'), function(v) return InList(NeverLose.ElementPresetOrder, v); end);
+			for role,control in pairs(ThemeEditors) do
+				ApplyControl(control, DecodeColor(GetByPath(state, 'Theme.Colors.'..role)));
+			end;
+			ApplyControl(SettingsControls.MenuTransparency, tonumber(GetByPath(state, 'Theme.MenuTransparency')) and math.floor(math.clamp(tonumber(GetByPath(state, 'Theme.MenuTransparency')),0,0.9)*100+0.5) or nil);
+			ApplyControl(SettingsControls.ContentTransparency, tonumber(GetByPath(state, 'Theme.ContentTransparency')) and math.floor(math.clamp(tonumber(GetByPath(state, 'Theme.ContentTransparency')),0,1)*100+0.5) or nil);
+			ApplyControl(SettingsControls.SectionTransparency, tonumber(GetByPath(state, 'Theme.SectionTransparency')) and math.floor(math.clamp(tonumber(GetByPath(state, 'Theme.SectionTransparency')),0,0.95)*100+0.5) or nil);
+			ApplyControl(SettingsControls.BackgroundEnabled, GetByPath(state, 'Background.Enabled'));
+			ApplyControl(SettingsControls.BackgroundOpacity, tonumber(GetByPath(state, 'Background.Opacity')) and math.floor(math.clamp(tonumber(GetByPath(state, 'Background.Opacity')),0,1)*100+0.5) or nil);
+			ApplyControl(SettingsControls.BackgroundDim, tonumber(GetByPath(state, 'Background.Dim')) and math.floor(math.clamp(tonumber(GetByPath(state, 'Background.Dim')),0,0.9)*100+0.5) or nil);
+			ApplyControl(SettingsControls.BackgroundTint, DecodeColor(GetByPath(state, 'Background.Tint')));
+			ApplyControl(SettingsControls.BackgroundFit, GetByPath(state, 'Background.Fit'), function(v) return InList({'Crop','Stretch','Fit'}, v); end);
+			ApplyControl(SettingsControls.KeybindListEnabled, GetByPath(state, 'KeybindList.Enabled'));
+			ApplyControl(SettingsControls.KeybindListShowAll, GetByPath(state, 'KeybindList.ShowAllInMenu'));
+			ApplyControl(SettingsControls.WatermarkUsername, GetByPath(state, 'Watermark.Username'));
+			ApplyControl(SettingsControls.WatermarkFPS, GetByPath(state, 'Watermark.FPS'));
+			ApplyControl(SettingsControls.WatermarkPing, GetByPath(state, 'Watermark.Ping'));
+			ApplyControl(SettingsControls.WatermarkTime, GetByPath(state, 'Watermark.Time'));
+
+			local backgroundSource = tostring(GetByPath(state, 'Background.Source') or '');
+			if #backgroundSource > 0 then
+				task.spawn(function()
+					local success = Window:SetBackgroundImage(backgroundSource);
+					if success then
+						Window:StoreSetting('Background.Source', backgroundSource, true);
+					end;
+				end);
+			else
+				Window:SetBackgroundImage('');
+			end;
+
+			local floatingEnabled = GetByPath(state, 'FloatingToggle.Enabled');
+			if floatingEnabled ~= nil then
+				Window:SetFloatingToggleEnabled(floatingEnabled ~= false);
+			end;
+			if NeverLose.__FloatingToggle and NeverLose.__FloatingToggle.Button then
+				local pos = GetByPath(state, 'FloatingToggle.Position');
+				if type(pos) == 'table' then
+					NeverLose.__FloatingToggle.Button.Position = UDim2.new(
+						tonumber(pos.XScale) or 1,
+						math.floor(tonumber(pos.XOffset) or -78),
+						tonumber(pos.YScale) or 0,
+						math.floor(tonumber(pos.YOffset) or 20)
+					);
+				end;
+			end;
+
+				Window:CaptureThemeSettings(true);
+			end);
+			if Window.SettingsStore then
+				Window.SettingsStore.Applying = false;
+			end;
+			if not applied_ok then
+				warn('Settings apply failed: '..tostring(applied_err));
+			end;
+			Window:QueueSettingsSave();
+		end;
 
 		return SettingsTab;
 	end;
@@ -11086,6 +11658,14 @@ function NeverLose:Unload()
 	if NeverLose.ConfigAutoSaveThread then
 		task.cancel(NeverLose.ConfigAutoSaveThread);
 		NeverLose.ConfigAutoSaveThread = nil;
+	end;
+
+	if NeverLose.__SettingsWindows then
+		for window in pairs(NeverLose.__SettingsWindows) do
+			pcall(function()
+				window:ShutdownSettingsPersistence();
+			end);
+		end;
 	end;
 
 	NeverLose:SetFloatingToggleEnabled(false);
